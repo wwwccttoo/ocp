@@ -1,9 +1,8 @@
 """
-
+This is a modified version of LMDBdataset from the OCP project for plasma-catalysis
 Copyright (c) 2023 Mesbah Lab. All Rights Reserved.
 Contributor(s): Ketong Shao
 
-This is a modified version of LMDBdataset from the OCP project for plasma-catalysis
 Copyright (c) Facebook, Inc. and its affiliates.
 
 This source code is licensed under the MIT license found in the
@@ -130,17 +129,43 @@ class PlasmaDataset(Dataset):
         if self.transform is not None:
             data_object = self.transform(data_object)
 
+        # TODO: add the forces information
+        # assign data used for Graphormer before modifying the information
+        data_object.natoms_gh = data_object.natoms
         data_object.atoms_gh = data_object.atomic_numbers
         data_object.pos_gh = data_object.pos
         data_object.tags_gh = data_object.tags
-        data_object.mask_ph = torch.ones_like(data_object.atoms_gh)
+        data_object.fixed_gh = data_object.fixed
+        data_object.mask_gh = torch.ones_like(data_object.atoms_gh)
         data_object.delta_pos_gh_9cell = extend_dist_calc(
             data_object.pos, data_object.cell
         )
-        # make out too large distances while keep the proton-atom distances
+        # mask out too large distances while keep the proton-atom distances
         data_object.delta_pos_ph_mask = (
-            data_object.delta_pos_gh_9cell.norm(dim=-1) < 8
-        ) | (data_object.atomic_numbers.eq(0).repeat(9))
+            (data_object.delta_pos_gh_9cell.norm(dim=-1) < 8)
+            | (data_object.atomic_numbers.eq(0).repeat(9))
+            | (data_object.atomic_numbers.eq(0).unsqueeze(-1))
+        )
+
+        # delete the proton for simple gnn
+        data_object.pos = data_object.pos[data_object.atomic_numbers.ne(0)]
+        data_object.tags = data_object.tags[data_object.atomic_numbers.ne(0)]
+        data_object.fixed = data_object.fixed[data_object.atomic_numbers.ne(0)]
+        data_object.natoms = data_object.natoms - (
+            1 - data_object.atomic_numbers.ne(0).all().int()
+        )
+        data_object.atomic_numbers = data_object.atomic_numbers[
+            data_object.atomic_numbers.ne(0)
+        ]
+
+        # delete the proton from edges
+        edge_not_with_proton = data_object.edge_index.ne(0).all(0)
+        data_object.edge_index = data_object.edge_index[
+            :, edge_not_with_proton
+        ]
+        data_object.cell_offsets = data_object.cell_offsets[
+            edge_not_with_proton, :
+        ]
         return data_object
 
     def connect_db(self, lmdb_path=None):
@@ -186,15 +211,28 @@ class TrajectoryPlasmaDataset(PlasmaDataset):
 def Plasmadata_list_collater(data_list, otf_graph=False):
     # exclude the dist, which will only be used in the graphormer
     batch = Batch.from_data_list(
-        data_list, exclude_keys=["delta_pos_gh_9cell", "delta_pos_ph_mask"]
+        data_list,
+        exclude_keys=[
+            "fixed_gh",
+            "atoms_gh",
+            "pos_gh",
+            "tags_gh",
+            "mask_gh",
+            "delta_pos_gh_9cell",
+            "delta_pos_ph_mask",
+        ],
     )
+    # TODO: add the forces information
     # should also process for Graphormer for padding
-    atoms_gh = pad_1d([_.atomic_numbers for _ in data_list], fill=510)
+    atoms_gh = pad_1d([_.atoms_gh for _ in data_list], fill=510)
     # (batch, natom)
-    pos_gh = pad_1d([_.pos for _ in data_list], fill=510)
+    pos_gh = pad_1d([_.pos_gh for _ in data_list], fill=510)
     # (batch, natom, 3)
-    tags_gh = pad_1d([_.tags for _ in data_list], fill=510)
+    tags_gh = pad_1d([_.tags_gh for _ in data_list], fill=510)
     # (batch, natom)
+    fixed_gh = pad_1d([_.fixed_gh for _ in data_list], fill=510)
+    # (batch, natom)
+
     delta_pos_gh_9cell = torch.cat(
         [
             extend_dist_calc(pos_gh[_id, :, :], _.cell).unsqueeze(0)
@@ -205,27 +243,34 @@ def Plasmadata_list_collater(data_list, otf_graph=False):
 
     mask_gh = torch.zeros_like(atoms_gh)
     for _ in range(len(data_list)):
-        mask_gh[_, : len(data_list[_].atomic_numbers)] = torch.ones_like(
-            data_list[_].atomic_numbers
+        mask_gh[_, : len(data_list[_].atoms_gh)] = torch.ones_like(
+            data_list[_].atoms_gh
         )
 
-    delta_pos_ph_mask = []
+    delta_pos_gh_mask = []
     for _ in range(delta_pos_gh_9cell.shape[0]):
-        delta_pos_ph_mask.append(
+        delta_pos_gh_mask.append(
             (
-                (delta_pos_gh_9cell[_].norm(dim=-1) < 8)
+                # exclude the padding ghost atom (510), while maintain the proton-atom distances
+                (
+                    (delta_pos_gh_9cell[_].norm(dim=-1) < 8)
+                    & (atoms_gh[_].ne(510).repeat(9))
+                    & (atoms_gh[_].ne(510).unsqueeze(-1))
+                )
                 | (atoms_gh[_].eq(0).repeat(9))
+                | (atoms_gh[_].eq(0).unsqueeze(-1))
             ).unsqueeze(0)
         )
-    delta_pos_ph_mask = torch.cat(delta_pos_ph_mask)
+    delta_pos_gh_mask = torch.cat(delta_pos_gh_mask)
     # (batch, natom, n_cell*natom)
 
     batch.atoms_gh = atoms_gh
     batch.pos_gh = pos_gh
     batch.tags_gh = tags_gh
+    batch.fixed_gh = fixed_gh
     batch.delta_pos_gh_9cell = delta_pos_gh_9cell
     batch.mask_gh = mask_gh
-    batch.delta_pos_ph_mask = delta_pos_ph_mask
+    batch.delta_pos_gh_mask = delta_pos_gh_mask
 
     if not otf_graph:
         try:
