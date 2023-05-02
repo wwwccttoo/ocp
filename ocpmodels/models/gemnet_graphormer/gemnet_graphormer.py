@@ -293,6 +293,12 @@ class GemNetGraphormer(BaseModel):
             (self.mlp_rbf_out.linear.weight, self.num_blocks + 1),
         ]
 
+        if self.freeze:
+            for name, param in self.named_parameters():
+                if param.requires_grad:
+                    # if "MHA" not in name and "block" not in name:
+                    param.requires_grad = False
+
         if self.attn_type == "base":
             emb_size_taag = 1
         else:
@@ -316,14 +322,6 @@ class GemNetGraphormer(BaseModel):
             )
         # defined graphormer after this, so the graphormer will not be frozen
         if self.freeze:
-            if self.attn_type == "multi":
-                for name, param in self.named_parameters():
-                    if param.requires_grad:
-                        if "MHA" not in name and "block" not in name:
-                            param.requires_grad = False
-            else:
-                pass
-
             self.after_freeze_IB = torch.nn.ModuleList(
                 [
                     interaction_block(
