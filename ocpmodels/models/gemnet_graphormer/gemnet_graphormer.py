@@ -871,13 +871,13 @@ class GemNetGraphormer(BaseModel):
         gbf_feature = self.gbf(dist[:, 0, :, :], edge_type)
         graph_attn_bias = self.bias_proj(gbf_feature).permute(0, 3, 1, 2)
         edge_features = gbf_feature.masked_fill(
-            delta_pos_gh_mask[:, 0, :, :].unsqueeze(-1), 0.0
+            delta_pos_gh_mask[:, 0, :, :].unsqueeze(-1).bool(), 0.0
         )
         for i in range(1, dist.shape[1]):
             gbf_feature = self.gbf(dist[:, i, :, :], edge_type)
             graph_attn_bias += self.bias_proj(gbf_feature).permute(0, 3, 1, 2)
             edge_features += gbf_feature.masked_fill(
-                delta_pos_gh_mask[:, i, :, :].unsqueeze(-1), 0.0
+                delta_pos_gh_mask[:, i, :, :].unsqueeze(-1).bool(), 0.0
             )
         graph_attn_bias = graph_attn_bias / dist.shape[1]
         # (batch, heads, natoms+padding, natoms+padding)
@@ -891,7 +891,9 @@ class GemNetGraphormer(BaseModel):
             dist.shape[0], -1, dist.shape[2], dist.shape[2], rbf_gh.shape[-1]
         )
         # (batch, 9, natoms+padding, natoms+padding, num_radial)
-        rbf_gh = rbf_gh.masked_fill(delta_pos_gh_mask.unsqueeze(-1), 0.0)
+        rbf_gh = rbf_gh.masked_fill(
+            delta_pos_gh_mask.unsqueeze(-1).bool(), 0.0
+        )
 
         # complex transformation here for atom_emb_gh, the edge length is (natoms+padding)*(natoms+padding)*9
         # (batch, natoms+padding, emb_dim) ->
@@ -949,7 +951,8 @@ class GemNetGraphormer(BaseModel):
         # (natoms+padding, batch, emb_dim)
 
         graph_attn_bias.masked_fill_(
-            delta_pos_gh_padding_mask[:, 0, :, :].unsqueeze(1), float("-inf")
+            delta_pos_gh_padding_mask[:, 0, :, :].unsqueeze(1).bool(),
+            float("-inf"),
         )
         # (batch, heads, natoms+padding, natoms+padding)
 
