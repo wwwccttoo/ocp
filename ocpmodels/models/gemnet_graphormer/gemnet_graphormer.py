@@ -808,9 +808,9 @@ class GemNetGraphormer(BaseModel):
                 self.padding_emb.weight,
             ]
         )
-        # natoms_gh = data.natoms_gh
+        # natoms_gh = data.natoms_gh.clone()
         atoms_gh = data.atoms_gh.long()
-        # pos_gh = data.pos_gh
+        # pos_gh = data.pos_gh.clone()
         # TODO: add a new tag type for proton and padding, which will be used in self.tag_encoder and self.energe_agg_factor
         tags_gh = data.tags_gh.long()
         tags_gh_padding_to_0 = tags_gh.clone()
@@ -818,7 +818,7 @@ class GemNetGraphormer(BaseModel):
         # fixed_gh = data.fixed_gh
         # force_gh = data.force_gh  # (batch, natoms+padding, 3)
         delta_pos_gh_9cell = (
-            data.delta_pos_gh_9cell
+            data.delta_pos_gh_9cell.clone()
         )  # (batch, natoms+padding, 9*(natoms+padding), 3)
         mask_gh = data.mask_gh.int()  # (batch, natoms+padding)
         delta_pos_gh_mask = (
@@ -972,7 +972,7 @@ class GemNetGraphormer(BaseModel):
             self.engergy_proj(eng_output)
             * self.energe_agg_factor(tags_gh_padding_to_0)
         ).flatten(-2)
-        # why flatten at -2???
+        # why flatten at -2??? This is equal to squeeze(-1)???
         # (batch, natoms+padding, emb_dim) -> (batch, natoms+padding, 1) -> (batch, natoms+padding)
         # TODO: add model toggle for whether to predict surface atom types
         # output_mask = (
@@ -981,7 +981,7 @@ class GemNetGraphormer(BaseModel):
 
         output_mask = mask_gh
         eng_output *= output_mask
-        eng_output = eng_output.sum(dim=-1)
+        eng_output = eng_output.sum(dim=-1).unsqueeze(-1)
         # (batch)
 
         delta_pos = delta_pos_gh_9cell.view(
@@ -1000,9 +1000,9 @@ class GemNetGraphormer(BaseModel):
 
         node_output = self.node_proc(output, graph_attn_bias, delta_pos)
 
-        node_target_mask = output_mask.unsqueeze(-1)
+        #  node_target_mask = output_mask.unsqueeze(-1)
 
-        return E_t, F_t, eng_output, node_output, node_target_mask
+        return E_t, F_t, eng_output, node_output
 
     @property
     def num_params(self):

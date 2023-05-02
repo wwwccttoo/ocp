@@ -8,7 +8,6 @@ LICENSE file in the root directory of this source tree.
 import numpy as np
 import torch
 
-
 """
 An evaluation module for use with the OCP dataset and suite of tasks. It should
 be possible to import this independently of the rest of the codebase, e.g:
@@ -75,6 +74,8 @@ class Evaluator:
         metrics = prev_metrics
 
         for fn in self.task_metrics[self.task]:
+            # TODO: should we support the evaluation for systems without protons?
+            # i.e. if a system does not have a proton, then there is an extra metric of metric(graphormer_pred - 0)
             res = eval(fn)(prediction, target)
             metrics = self.update(fn, res, metrics)
 
