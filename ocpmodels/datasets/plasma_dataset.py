@@ -159,6 +159,7 @@ class PlasmaDataset(Dataset):
             1 - data_object.atomic_numbers.ne(0).all().int()
         )
         proton_indices = torch.where(data_object.atomic_numbers == 0)[0]
+        data_object.force = data_object.force[data_object.atomic_numbers.ne(0)]
         data_object.atomic_numbers = data_object.atomic_numbers[
             data_object.atomic_numbers.ne(0)
         ]

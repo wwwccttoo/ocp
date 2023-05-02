@@ -564,8 +564,10 @@ class ForcesTrainerCharge(BaseTrainerCharge):
 
             forces_pred = torch.cat(forces_pred, dim=0) + out["forces"]
             # (total_atoms, 3)
-            forces_from_graphormer_but_no_proton = torch.cat(
-                forces_from_graphormer_but_no_proton, dim=0
+            forces_from_graphormer_but_no_proton = (
+                torch.cat(forces_from_graphormer_but_no_proton, dim=0)
+                if forces_from_graphormer_but_no_proton
+                else torch.tensor([]).reshape(-1, 3)
             )
             # (total_atoms-atoms_from_system_with_proton, 3)
 
@@ -687,8 +689,10 @@ class ForcesTrainerCharge(BaseTrainerCharge):
 
                     forces_pred = torch.cat(forces_pred, dim=0)
                     # (total_unfixed_atoms, 3)
-                    forces_from_graphormer_but_no_proton = torch.cat(
-                        forces_from_graphormer_but_no_proton, dim=0
+                    forces_from_graphormer_but_no_proton = (
+                        torch.cat(forces_from_graphormer_but_no_proton, dim=0)
+                        if forces_from_graphormer_but_no_proton
+                        else torch.tensor([]).reshape(-1, 3)
                     )
                     # (total_unfixed_atoms-unfixed_atoms_from_system_with_proton, 3)
                     mask = fixed == 0
@@ -764,7 +768,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         for lc in loss:
             assert hasattr(lc, "grad_fn")
 
-        loss = sum(loss)
+        loss = sum(ls for ls in loss if not ls.isnan())
         return loss
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
