@@ -329,9 +329,16 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         # to prevent inconsistencies due to different batch size in checkpoint.
         start_epoch = self.step // len(self.train_loader)
 
-        for epoch_int in range(
-            start_epoch, self.config["optim"]["max_epochs"]
-        ):
+        if disable_eval_tqdm:
+            epoch_iterator = range(
+                start_epoch, self.config["optim"]["max_epochs"]
+            )
+        else:
+            epoch_iterator = tqdm(
+                range(start_epoch, self.config["optim"]["max_epochs"])
+            )
+
+        for epoch_int in epoch_iterator:
             self.train_sampler.set_epoch(epoch_int)
             skip_steps = self.step % len(self.train_loader)
             train_loader_iter = iter(self.train_loader)
@@ -568,7 +575,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
                 torch.cat(forces_from_graphormer_but_no_proton, dim=0)
                 if forces_from_graphormer_but_no_proton
                 else torch.tensor([]).reshape(-1, 3)
-            )
+            ).to(self.device)
             # (total_atoms-atoms_from_system_with_proton, 3)
 
             tag_specific_weights = self.config["task"].get(
@@ -693,7 +700,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
                         torch.cat(forces_from_graphormer_but_no_proton, dim=0)
                         if forces_from_graphormer_but_no_proton
                         else torch.tensor([]).reshape(-1, 3)
-                    )
+                    ).to(self.device)
                     # (total_unfixed_atoms-unfixed_atoms_from_system_with_proton, 3)
                     mask = fixed == 0
                     if (
