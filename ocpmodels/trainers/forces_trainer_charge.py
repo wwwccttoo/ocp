@@ -452,7 +452,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         if self.config.get("test_dataset", False):
             self.test_dataset.close_db()
 
-    def _forward(self, batch_list):
+    def _forward(self, batch_list, mask_out_graphormer=True):
         # forward pass.
         if self.config["model_attributes"].get("regress_forces", True):
             out_energy, out_forces, out_energy_gh, out_forces_gh = self.model(
@@ -465,14 +465,18 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         if out_energy.shape[-1] == 1:
             out_energy = out_energy.view(-1)
 
-        out = {
+        old_out = {
             "energy": out_energy,
             "energy_gh": out_energy_gh,
         }
 
         if self.config["model_attributes"].get("regress_forces", True):
-            out["forces"] = out_forces
-            out["forces_gh"] = out_forces_gh
+            old_out["forces"] = out_forces
+            old_out["forces_gh"] = out_forces_gh
+
+        out = self._merge_gnn_and_graphormer(
+            old_out, batch_list, mask_out_graphormer
+        )
 
         return out
 
@@ -491,11 +495,11 @@ class ForcesTrainerCharge(BaseTrainerCharge):
             )
         y_energy = torch.cat(y_energy, dim=0)
         y_pred_energy_mask = torch.cat(y_pred_energy_mask, dim=0)
-        # (total_batch, )
+        # (total_batch,)
 
-        energy_from_gnn_and_graphormer = (
-            out["energy"] + out["energy_gh"] * y_pred_energy_mask
-        )
+        energy_from_gnn_and_graphormer = out["energy"] + out[
+            "energy_gh"
+        ] * y_pred_energy_mask.unsqueeze(-1)
         energy_from_graphormer_but_no_proton = out["energy_gh"][
             y_pred_energy_mask.eq(0)
         ]
@@ -508,7 +512,9 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         # Energy loss for systems with protons
         loss.append(
             energy_mult
-            * self.loss_fn["energy"](energy_from_gnn_and_graphormer, y_energy)
+            * self.loss_fn["energy"](
+                energy_from_gnn_and_graphormer, y_energy.unsqueeze(-1)
+            )
         )
 
         # Energy loss for systems without protons
@@ -778,7 +784,82 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         loss = sum(ls for ls in loss if not ls.isnan())
         return loss
 
+    def _merge_gemnet_graphormer(
+        self, out, batch_list, mask_out_graphormer=False
+    ):
+        """
+        Merge the gemnet and graphormer outputs
+        This function is only used in predict and _compute_metrics
+        _compute_loss needs special treatment so will not use this function
+        :param out:
+        :param batch_list:
+        :return:
+        """
+        merged_out = {}
+        # pick systems having proton(s)
+        y_pred_energy_mask = []
+        for batch in batch_list:
+            # 1 for systems with protons, 0 for systems without protons
+            y_pred_energy_mask.append(
+                batch.atoms_gh.eq(0).any(-1).int().to(self.device)
+            )
+        y_pred_energy_mask = torch.cat(y_pred_energy_mask, dim=0)
+        if mask_out_graphormer:
+            energy_from_gnn_and_graphormer = out["energy"] + out[
+                "energy_gh"
+            ] * y_pred_energy_mask.unsqueeze(-1)
+        else:
+            energy_from_gnn_and_graphormer = out["energy"] + out["energy_gh"]
+        # (total_batch,)
+        merged_out["energy"] = energy_from_gnn_and_graphormer
+        if "forces" in out:
+            # pick atoms are not ghost nor proton
+            # batch-wise padding could be different !!!!!!
+            forces_pred_mask = []
+            for batch in batch_list:
+                # 1 for proton and ghost atoms, 0 for real atoms
+                tmp_mask = batch.atoms_gh.eq(0) | batch.atoms_gh.eq(
+                    510
+                ).int().to(self.device)
+                forces_pred_mask.extend(
+                    [tmp_mask[_] for _ in range(tmp_mask.size(0))]
+                )
+            # (total_batch, atoms+padding) # this is a list and very causal, the atoms+padding could be different
+
+            # expand the energy mask for forces
+            y_pred_energy_mask_expand_for_forces = []
+            for i in range(y_pred_energy_mask.shape[0]):
+                y_pred_energy_mask_expand_for_forces.append(
+                    y_pred_energy_mask[i]
+                    .unsqueeze(-1)
+                    .repeat(forces_pred_mask[i].shape[0])
+                )
+            # (total_batch, atoms+padding) # this is a list and very causal, the atoms+padding could be different
+            forces_pred = []
+            for i in range(len(forces_pred_mask)):
+                if mask_out_graphormer:
+                    forces_pred.append(
+                        (
+                            out["forces_gh"][i]
+                            * y_pred_energy_mask_expand_for_forces[
+                                i
+                            ].unsqueeze(-1)
+                        )[forces_pred_mask[i].eq(0)]
+                    )
+                else:
+                    forces_pred.append(
+                        out["forces_gh"][i][forces_pred_mask[i].eq(0)]
+                    )
+
+            forces_pred = torch.cat(forces_pred, dim=0) + out["forces"]
+            # (total_atoms, 3)
+            merged_out["forces"] = forces_pred
+
+            return merged_out
+
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
+        out = self._merge_gemnet_graphormer(out, batch_list)
+
         natoms = torch.cat(
             [batch.natoms.to(self.device) for batch in batch_list], dim=0
         )
