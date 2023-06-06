@@ -474,7 +474,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
             old_out["forces"] = out_forces
             old_out["forces_gh"] = out_forces_gh
 
-        out = self._merge_gnn_and_graphormer(
+        out = self._merge_gemnet_graphormer(
             old_out, batch_list, mask_out_graphormer
         )
 
