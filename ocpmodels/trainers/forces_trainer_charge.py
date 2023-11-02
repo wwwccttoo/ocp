@@ -518,6 +518,7 @@ class ForcesTrainerCharge(BaseTrainerCharge):
         )
 
         # Energy loss for systems without protons
+        # We penalize the results from graphormer towards 0
         loss.append(
             energy_mult
             * self.loss_fn["energy"](
