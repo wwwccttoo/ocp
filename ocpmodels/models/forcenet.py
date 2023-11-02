@@ -5,8 +5,8 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
-import os
 from math import pi as PI
+from typing import Optional
 
 import numpy as np
 import torch
@@ -15,7 +15,6 @@ from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
 
 from ocpmodels.common.registry import registry
-from ocpmodels.common.utils import get_pbc_distances, radius_graph_pbc
 from ocpmodels.datasets.embeddings import ATOMIC_RADII, CONTINUOUS_EMBEDDINGS
 from ocpmodels.models.base import BaseModel
 from ocpmodels.models.utils.activations import Act
@@ -23,12 +22,15 @@ from ocpmodels.models.utils.basis import Basis, SphericalSmearing
 
 
 class FNDecoder(nn.Module):
-    def __init__(self, decoder_type, decoder_activation_str, output_dim):
+    def __init__(
+        self, decoder_type, decoder_activation_str, output_dim: int
+    ) -> None:
         super(FNDecoder, self).__init__()
         self.decoder_type = decoder_type
         self.decoder_activation = Act(decoder_activation_str)
         self.output_dim = output_dim
 
+        self.decoder: nn.Sequential
         if self.decoder_type == "linear":
             self.decoder = nn.Sequential(nn.Linear(self.output_dim, 3))
         elif self.decoder_type == "mlp":
@@ -43,7 +45,7 @@ class FNDecoder(nn.Module):
 
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         for m in self.decoder:
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
@@ -56,14 +58,14 @@ class FNDecoder(nn.Module):
 class InteractionBlock(MessagePassing):
     def __init__(
         self,
-        hidden_channels,
-        mlp_basis_dim,
+        hidden_channels: int,
+        mlp_basis_dim: int,
         basis_type,
-        depth_mlp_edge=2,
-        depth_mlp_trans=1,
-        activation_str="ssp",
-        ablation="none",
-    ):
+        depth_mlp_edge: int = 2,
+        depth_mlp_trans: int = 1,
+        activation_str: str = "ssp",
+        ablation: str = "none",
+    ) -> None:
         super(InteractionBlock, self).__init__(aggr="add")
 
         self.activation = Act(activation_str)
@@ -91,7 +93,7 @@ class InteractionBlock(MessagePassing):
 
         if depth_mlp_edge > 0:
             mlp_edge = [torch.nn.Linear(in_features, hidden_channels)]
-            for i in range(depth_mlp_edge):
+            for _ in range(depth_mlp_edge):
                 mlp_edge.append(self.activation)
                 mlp_edge.append(
                     torch.nn.Linear(hidden_channels, hidden_channels)
@@ -109,7 +111,7 @@ class InteractionBlock(MessagePassing):
 
         if depth_mlp_trans > 0:
             mlp_trans = [torch.nn.Linear(hidden_channels, hidden_channels)]
-            for i in range(depth_mlp_trans):
+            for _ in range(depth_mlp_trans):
                 mlp_trans.append(torch.nn.BatchNorm1d(hidden_channels))
                 mlp_trans.append(self.activation)
                 mlp_trans.append(
@@ -131,7 +133,7 @@ class InteractionBlock(MessagePassing):
 
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         if self.basis_type != "rawcat":
             torch.nn.init.xavier_uniform_(self.lin_basis.weight)
             self.lin_basis.bias.data.fill_(0)
@@ -232,28 +234,27 @@ class ForceNet(BaseModel):
 
     def __init__(
         self,
-        num_atoms,  # not used
-        bond_feat_dim,  # not used
-        num_targets,  # not used
-        hidden_channels=512,
-        num_interactions=5,
-        cutoff=6.0,
-        feat="full",
-        num_freqs=50,
-        max_n=3,
-        basis="sphallmul",
-        depth_mlp_edge=2,
-        depth_mlp_node=1,
-        activation_str="swish",
-        ablation="none",
-        decoder_hidden_channels=512,
-        decoder_type="mlp",
-        decoder_activation_str="swish",
-        training=True,
-        otf_graph=False,
-        use_pbc=True,
-    ):
-
+        num_atoms: int,  # not used
+        bond_feat_dim: int,  # not used
+        num_targets: int,  # not used
+        hidden_channels: int = 512,
+        num_interactions: int = 5,
+        cutoff: float = 6.0,
+        feat: str = "full",
+        num_freqs: int = 50,
+        max_n: int = 3,
+        basis: str = "sphallmul",
+        depth_mlp_edge: int = 2,
+        depth_mlp_node: int = 1,
+        activation_str: str = "swish",
+        ablation: str = "none",
+        decoder_hidden_channels: int = 512,
+        decoder_type: str = "mlp",
+        decoder_activation_str: str = "swish",
+        training: bool = True,
+        otf_graph: bool = False,
+        use_pbc: bool = True,
+    ) -> None:
         super(ForceNet, self).__init__()
         self.training = training
         self.ablation = ablation
@@ -322,7 +323,7 @@ class ForceNet(BaseModel):
         elif "sphcosine" in self.basis_type:
             self.pbc_sph_option = "cosine"
 
-        self.pbc_sph = None
+        self.pbc_sph: Optional[SphericalSmearing] = None
         if self.pbc_apply_sph_harm:
             self.pbc_sph = SphericalSmearing(
                 max_n=self.max_n, option=self.pbc_sph_option
@@ -500,7 +501,7 @@ class ForceNet(BaseModel):
             edge_attr = self.basis_fun(raw_edge_attr)
 
         # pass edge_attributes through interaction blocks
-        for i, interaction in enumerate(self.interactions):
+        for _, interaction in enumerate(self.interactions):
             h = h + interaction(h, edge_index, edge_attr, edge_weight)
 
         h = self.lin(h)
@@ -513,5 +514,5 @@ class ForceNet(BaseModel):
         return energy, force
 
     @property
-    def num_params(self):
+    def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())

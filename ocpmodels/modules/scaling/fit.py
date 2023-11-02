@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ocpmodels.trainers.base_trainer import BaseTrainer
 
 
-def _prefilled_input(prompt: str, prefill: str = ""):
+def _prefilled_input(prompt: str, prefill: str = "") -> str:
     readline.set_startup_hook(lambda: readline.insert_text(prefill))
     try:
         return input(prompt)
@@ -32,7 +32,7 @@ def _prefilled_input(prompt: str, prefill: str = ""):
         readline.set_startup_hook()
 
 
-def _train_batch(trainer: "BaseTrainer", batch):
+def _train_batch(trainer: "BaseTrainer", batch) -> None:
     with torch.no_grad():
         with torch.cuda.amp.autocast(enabled=trainer.scaler is not None):
             out = trainer._forward(batch)
@@ -40,7 +40,7 @@ def _train_batch(trainer: "BaseTrainer", batch):
         del out, loss
 
 
-def main(*, num_batches: int = 16):
+def main(*, num_batches: int = 16) -> None:
     # region args/config setup
     setup_logging()
 
@@ -72,7 +72,7 @@ def main(*, num_batches: int = 16):
         ), "Val dataset is required for making predictions"
 
         if ckpt_file.exists():
-            trainer.load_checkpoint(str(ckpt_file))
+            trainer.load_checkpoint(checkpoint_path=str(ckpt_file))
 
         # region reoad scale file contents if necessary
         # unwrap module from DP/DDP
@@ -123,10 +123,14 @@ def main(*, num_batches: int = 16):
             elif str(flag) == "2":
                 mode = "unfitted"
                 logging.info("Only fitting unfitted variables.")
-            else:
-                print(flag)
+            elif str(flag) == "3":
                 logging.info("Exiting script")
                 sys.exit()
+            else:
+                logging.error(
+                    f"Unrecognized flag associated with fitted_scale_factors: '{flag}'. Exiting."
+                )
+                sys.exit(-1)
         # endregion
 
         # region get the output path
@@ -171,7 +175,7 @@ def main(*, num_batches: int = 16):
         # initialize all scale factors
         for name, module in scale_factors.items():
 
-            def index_fn(name=name):
+            def index_fn(name: str = name) -> None:
                 nonlocal max_idx
                 assert name is not None
                 if name not in scale_factor_indices:

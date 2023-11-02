@@ -11,6 +11,7 @@ import warnings
 import numpy as np
 from tqdm import tqdm
 
+from ocpmodels.common.typing import assert_is_instance
 from ocpmodels.datasets import SinglePointLmdbDataset, TrajectoryLmdbDataset
 
 
@@ -24,8 +25,8 @@ def get_data(index):
     return index, natoms, neighbors
 
 
-def main(args):
-    path = args.data_path
+def main(args) -> None:
+    path = assert_is_instance(args.data_path, str)
     global dataset
     if os.path.isdir(path):
         dataset = TrajectoryLmdbDataset({"src": path})
@@ -34,10 +35,12 @@ def main(args):
         dataset = SinglePointLmdbDataset({"src": path})
         outpath = os.path.join(os.path.dirname(path), "metadata.npz")
 
-    indices = range(len(dataset))
+    output_indices = range(len(dataset))
 
-    pool = mp.Pool(args.num_workers)
-    outputs = list(tqdm(pool.imap(get_data, indices), total=len(indices)))
+    pool = mp.Pool(assert_is_instance(args.num_workers, int))
+    outputs = list(
+        tqdm(pool.imap(get_data, output_indices), total=len(indices))
+    )
 
     indices = []
     natoms = []
@@ -73,5 +76,5 @@ if __name__ == "__main__":
         type=int,
         help="Num of workers to parallelize across",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
     main(args)

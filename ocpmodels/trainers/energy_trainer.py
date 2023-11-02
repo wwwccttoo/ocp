@@ -6,6 +6,7 @@ LICENSE file in the root directory of this source tree.
 """
 
 import logging
+from typing import Optional
 
 import torch
 import torch_geometric
@@ -62,19 +63,19 @@ class EnergyTrainer(BaseTrainer):
         optimizer,
         identifier,
         normalizer=None,
-        timestamp_id=None,
+        timestamp_id: Optional[str] = None,
         run_dir=None,
-        is_debug=False,
-        is_hpo=False,
-        print_every=100,
+        is_debug: bool = False,
+        is_hpo: bool = False,
+        print_every: int = 100,
         seed=None,
-        logger="tensorboard",
-        local_rank=0,
-        amp=False,
-        cpu=False,
+        logger: str = "tensorboard",
+        local_rank: int = 0,
+        amp: bool = False,
+        cpu: bool = False,
         slurm={},
-        noddp=False,
-    ):
+        noddp: bool = False,
+    ) -> None:
         super().__init__(
             task=task,
             model=model,
@@ -97,13 +98,17 @@ class EnergyTrainer(BaseTrainer):
             noddp=noddp,
         )
 
-    def load_task(self):
+    def load_task(self) -> None:
         logging.info(f"Loading dataset: {self.config['task']['dataset']}")
         self.num_targets = 1
 
     @torch.no_grad()
     def predict(
-        self, loader, per_image=True, results_file=None, disable_tqdm=False
+        self,
+        loader,
+        per_image: bool = True,
+        results_file=None,
+        disable_tqdm: bool = False,
     ):
         ensure_fitted(self._unwrapped_model)
 
@@ -130,7 +135,7 @@ class EnergyTrainer(BaseTrainer):
             self.normalizers["target"].to(self.device)
         predictions = {"id": [], "energy": []}
 
-        for i, batch in tqdm(
+        for _, batch in tqdm(
             enumerate(loader),
             total=len(loader),
             position=rank,
@@ -163,7 +168,7 @@ class EnergyTrainer(BaseTrainer):
 
         return predictions
 
-    def train(self, disable_eval_tqdm=False):
+    def train(self, disable_eval_tqdm: bool = False) -> None:
         ensure_fitted(self._unwrapped_model, warn=True)
 
         eval_every = self.config["optim"].get(
@@ -229,7 +234,7 @@ class EnergyTrainer(BaseTrainer):
                     log_str = [
                         "{}: {:.2e}".format(k, v) for k, v in log_dict.items()
                     ]
-                    print(", ".join(log_str))
+                    logging.info(", ".join(log_str))
                     self.metrics = {}
 
                 if self.logger is not None:

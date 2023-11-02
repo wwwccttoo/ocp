@@ -13,14 +13,15 @@ from torch_geometric.nn import radius_graph
 
 from ocpmodels.common.utils import (
     compute_neighbors,
-    conditional_grad,
     get_pbc_distances,
     radius_graph_pbc,
 )
 
 
 class BaseModel(nn.Module):
-    def __init__(self, num_atoms=None, bond_feat_dim=None, num_targets=None):
+    def __init__(
+        self, num_atoms=None, bond_feat_dim=None, num_targets=None
+    ) -> None:
         super(BaseModel, self).__init__()
         self.num_atoms = num_atoms
         self.bond_feat_dim = bond_feat_dim
@@ -122,5 +123,5 @@ class BaseModel(nn.Module):
         )
 
     @property
-    def num_params(self):
+    def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())

@@ -1,6 +1,7 @@
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
 import pytest
@@ -12,6 +13,8 @@ DATA = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 SIZE_ATOMS = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 SIZE_NEIGHBORS = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
 
+T_co = TypeVar("T_co", covariant=True)
+
 
 @contextmanager
 def _temp_file(name: str):
@@ -21,8 +24,8 @@ def _temp_file(name: str):
 
 @pytest.fixture
 def valid_path_dataset():
-    class _Dataset(Dataset):
-        def __init__(self, data, fpath: Path):
+    class _Dataset(Dataset[T_co]):
+        def __init__(self, data, fpath: Path) -> None:
             self.data = data
             self.metadata_path = fpath
 
@@ -44,7 +47,7 @@ def valid_path_dataset():
 @pytest.fixture
 def invalid_path_dataset():
     class _Dataset(Dataset):
-        def __init__(self, data):
+        def __init__(self, data) -> None:
             self.data = data
             self.metadata_path = Path("/tmp/does/not/exist.np")
 
@@ -60,7 +63,7 @@ def invalid_path_dataset():
 @pytest.fixture
 def invalid_dataset():
     class _Dataset(Dataset):
-        def __init__(self, data):
+        def __init__(self, data) -> None:
             self.data = data
 
         def __len__(self):
@@ -72,7 +75,7 @@ def invalid_dataset():
     return _Dataset(DATA)
 
 
-def test_lowercase(invalid_dataset):
+def test_lowercase(invalid_dataset) -> None:
     sampler = BalancedBatchSampler(
         dataset=invalid_dataset,
         batch_size=1,
@@ -96,7 +99,7 @@ def test_lowercase(invalid_dataset):
     assert sampler.mode == "neighbors"
 
 
-def test_invalid_mode(invalid_dataset):
+def test_invalid_mode(invalid_dataset) -> None:
     with pytest.raises(
         ValueError, match="Must be one of 'atoms', 'neighbors', or a boolean."
     ):
@@ -124,7 +127,7 @@ def test_invalid_mode(invalid_dataset):
         )
 
 
-def test_invalid_dataset(invalid_dataset):
+def test_invalid_dataset(invalid_dataset) -> None:
     with pytest.raises(
         RuntimeError,
         match="does not have a metadata_path attribute. BalancedBatchSampler has to load the data to  determine batch sizes, which incurs significant overhead!",
@@ -155,7 +158,7 @@ def test_invalid_dataset(invalid_dataset):
         )
 
 
-def test_invalid_path_dataset(invalid_path_dataset):
+def test_invalid_path_dataset(invalid_path_dataset) -> None:
     with pytest.raises(
         RuntimeError,
         match="Metadata file .+ does not exist. BalancedBatchSampler has to load the data to  determine batch sizes, which incurs significant overhead!",
@@ -186,7 +189,7 @@ def test_invalid_path_dataset(invalid_path_dataset):
         )
 
 
-def test_valid_dataset(valid_path_dataset):
+def test_valid_dataset(valid_path_dataset) -> None:
     sampler = BalancedBatchSampler(
         dataset=valid_path_dataset,
         batch_size=1,
@@ -210,7 +213,7 @@ def test_valid_dataset(valid_path_dataset):
     assert (sampler.sizes == np.array(SIZE_NEIGHBORS)).all()
 
 
-def test_disabled(valid_path_dataset):
+def test_disabled(valid_path_dataset) -> None:
     sampler = BalancedBatchSampler(
         dataset=valid_path_dataset,
         batch_size=1,
@@ -223,7 +226,7 @@ def test_disabled(valid_path_dataset):
     assert sampler.balance_batches is False
 
 
-def test_single_node(valid_path_dataset):
+def test_single_node(valid_path_dataset) -> None:
     sampler = BalancedBatchSampler(
         dataset=valid_path_dataset,
         batch_size=1,

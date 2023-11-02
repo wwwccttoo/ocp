@@ -12,6 +12,7 @@ import random
 import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -30,6 +31,7 @@ from ocpmodels.common.data_parallel import (
     ParallelCollater,
 )
 from ocpmodels.common.registry import registry
+from ocpmodels.common.typing import assert_is_instance
 from ocpmodels.common.utils import load_state_dict, save_checkpoint
 from ocpmodels.modules.evaluator import Evaluator
 from ocpmodels.modules.exponential_moving_average import (
@@ -59,34 +61,37 @@ class BaseTrainer(ABC):
         optimizer,
         identifier,
         normalizer=None,
-        timestamp_id=None,
+        timestamp_id: Optional[str] = None,
         run_dir=None,
-        is_debug=False,
-        is_hpo=False,
-        print_every=100,
+        is_debug: bool = False,
+        is_hpo: bool = False,
+        print_every: int = 100,
         seed=None,
-        logger="tensorboard",
-        local_rank=0,
-        amp=False,
-        cpu=False,
-        name="base_trainer",
+        logger: str = "tensorboard",
+        local_rank: int = 0,
+        amp: bool = False,
+        cpu: bool = False,
+        name: str = "base_trainer",
         slurm={},
-        noddp=False,
-    ):
+        noddp: bool = False,
+    ) -> None:
         self.name = name
         self.cpu = cpu
         self.epoch = 0
         self.step = 0
 
+        self.device: torch.device
         if torch.cuda.is_available() and not self.cpu:
             self.device = torch.device(f"cuda:{local_rank}")
         else:
             self.device = torch.device("cpu")
             self.cpu = True  # handle case when `--cpu` isn't specified
             # but there are no gpu devices available
+
         if run_dir is None:
             run_dir = os.getcwd()
 
+        self.timestamp_id: str
         if timestamp_id is None:
             timestamp = torch.tensor(datetime.datetime.now().timestamp()).to(
                 self.device
@@ -94,7 +99,7 @@ class BaseTrainer(ABC):
             # create directories from master rank only
             distutils.broadcast(timestamp, 0)
             timestamp = datetime.datetime.fromtimestamp(
-                timestamp.int()
+                timestamp.float().item()
             ).strftime("%Y-%m-%d-%H-%M-%S")
             if identifier:
                 self.timestamp_id = f"{timestamp}-{identifier}"
@@ -109,7 +114,7 @@ class BaseTrainer(ABC):
                     [
                         "git",
                         "-C",
-                        ocpmodels.__path__[0],
+                        assert_is_instance(ocpmodels.__path__[0], str),
                         "describe",
                         "--always",
                     ]
@@ -125,7 +130,7 @@ class BaseTrainer(ABC):
         self.config = {
             "task": task,
             "trainer": "forces" if name == "s2ef" else "energy",
-            "model": model.pop("name"),
+            "model": assert_is_instance(model.pop("name"), str),
             "model_attributes": model,
             "optim": optimizer,
             "logger": logger,
@@ -201,12 +206,12 @@ class BaseTrainer(ABC):
             )
 
         if distutils.is_master():
-            print(yaml.dump(self.config, default_flow_style=False))
+            logging.info(yaml.dump(self.config, default_flow_style=False))
         self.load()
 
         self.evaluator = Evaluator(task=name)
 
-    def load(self):
+    def load(self) -> None:
         self.load_seed_from_config()
         self.load_logger()
         self.load_datasets()
@@ -216,7 +221,7 @@ class BaseTrainer(ABC):
         self.load_optimizer()
         self.load_extras()
 
-    def load_seed_from_config(self):
+    def load_seed_from_config(self) -> None:
         # https://pytorch.org/docs/stable/notes/randomness.html
         seed = self.config["cmd"]["seed"]
         if seed is None:
@@ -229,7 +234,7 @@ class BaseTrainer(ABC):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    def load_logger(self):
+    def load_logger(self) -> None:
         self.logger = None
         if not self.is_debug and distutils.is_master() and not self.is_hpo:
             assert (
@@ -242,7 +247,9 @@ class BaseTrainer(ABC):
 
             self.logger = registry.get_logger_class(logger_name)(self.config)
 
-    def get_sampler(self, dataset, batch_size, shuffle):
+    def get_sampler(
+        self, dataset, batch_size: int, shuffle: bool
+    ) -> BalancedBatchSampler:
         if "load_balancing" in self.config["optim"]:
             balancing_mode = self.config["optim"]["load_balancing"]
             force_balancing = True
@@ -268,7 +275,7 @@ class BaseTrainer(ABC):
         )
         return sampler
 
-    def get_dataloader(self, dataset, sampler):
+    def get_dataloader(self, dataset, sampler) -> DataLoader:
         loader = DataLoader(
             dataset,
             collate_fn=self.parallel_collater,
@@ -278,13 +285,15 @@ class BaseTrainer(ABC):
         )
         return loader
 
-    def load_datasets(self):
+    def load_datasets(self) -> None:
         self.parallel_collater = ParallelCollater(
             0 if self.cpu else 1,
             self.config["model_attributes"].get("otf_graph", False),
         )
 
-        self.train_loader = self.val_loader = self.test_loader = None
+        self.train_loader = None
+        self.val_loader = None
+        self.test_loader = None
 
         if self.config.get("dataset", None):
             self.train_dataset = registry.get_dataset_class(
@@ -354,7 +363,7 @@ class BaseTrainer(ABC):
     def load_task(self):
         """Initialize task-specific information. Derived classes should implement this function."""
 
-    def load_model(self):
+    def load_model(self) -> None:
         # Build model
         if distutils.is_master():
             logging.info(f"Loading model: {self.config['model']}")
@@ -396,15 +405,21 @@ class BaseTrainer(ABC):
                 self.model, device_ids=[self.device]
             )
 
-    def load_checkpoint(self, checkpoint_path):
-        if not os.path.isfile(checkpoint_path):
-            raise FileNotFoundError(
-                errno.ENOENT, "Checkpoint file not found", checkpoint_path
-            )
+    def load_checkpoint(
+        self, checkpoint_path: str, checkpoint: Dict = {}
+    ) -> None:
+        if not checkpoint:
+            if not os.path.isfile(checkpoint_path):
+                raise FileNotFoundError(
+                    errno.ENOENT, "Checkpoint file not found", checkpoint_path
+                )
+            else:
+                logging.info(f"Loading checkpoint from: {checkpoint_path}")
+                map_location = torch.device("cpu") if self.cpu else self.device
+                checkpoint = torch.load(
+                    checkpoint_path, map_location=map_location
+                )
 
-        logging.info(f"Loading checkpoint from: {checkpoint_path}")
-        map_location = torch.device("cpu") if self.cpu else self.device
-        checkpoint = torch.load(checkpoint_path, map_location=map_location)
         self.epoch = checkpoint.get("epoch", 0)
         self.step = checkpoint.get("step", 0)
         self.best_val_metric = checkpoint.get("best_val_metric", None)
@@ -460,10 +475,11 @@ class BaseTrainer(ABC):
             if self.scaler and checkpoint["amp"]:
                 self.scaler.load_state_dict(checkpoint["amp"])
 
-    def load_loss(self):
-        self.loss_fn = {}
-        self.loss_fn["energy"] = self.config["optim"].get("loss_energy", "mae")
-        self.loss_fn["force"] = self.config["optim"].get("loss_force", "mae")
+    def load_loss(self) -> None:
+        self.loss_fn: Dict[str, str] = {
+            "energy": self.config["optim"].get("loss_energy", "mae"),
+            "force": self.config["optim"].get("loss_force", "mae"),
+        }
         for loss, loss_name in self.loss_fn.items():
             if loss_name in ["l1", "mae"]:
                 self.loss_fn[loss] = nn.L1Loss()
@@ -479,12 +495,11 @@ class BaseTrainer(ABC):
                 )
             self.loss_fn[loss] = DDPLoss(self.loss_fn[loss])
 
-    def load_optimizer(self):
+    def load_optimizer(self) -> None:
         optimizer = self.config["optim"].get("optimizer", "AdamW")
         optimizer = getattr(optim, optimizer)
 
         if self.config["optim"].get("weight_decay", 0) > 0:
-
             # Do not regularize bias etc.
             params_decay = []
             params_no_decay = []
@@ -517,7 +532,7 @@ class BaseTrainer(ABC):
                 **self.config["optim"].get("optimizer_params", {}),
             )
 
-    def load_extras(self):
+    def load_extras(self) -> None:
         self.scheduler = LRScheduler(self.optimizer, self.config["optim"])
         self.clip_grad_norm = self.config["optim"].get("clip_grad_norm")
         self.ema_decay = self.config["optim"].get("ema_decay")
@@ -532,8 +547,8 @@ class BaseTrainer(ABC):
     def save(
         self,
         metrics=None,
-        checkpoint_file="checkpoint.pt",
-        training_state=True,
+        checkpoint_file: str = "checkpoint.pt",
+        training_state: bool = True,
     ):
         if not self.is_debug and distutils.is_master():
             if training_state:
@@ -590,7 +605,7 @@ class BaseTrainer(ABC):
                 return ckpt_path
         return None
 
-    def save_hpo(self, epoch, step, metrics, checkpoint_every):
+    def save_hpo(self, epoch, step: int, metrics, checkpoint_every: int):
         # default is no checkpointing
         # checkpointing frequency can be adjusted by setting checkpoint_every in steps
         # to checkpoint every time results are communicated to Ray Tune set checkpoint_every=1
@@ -632,7 +647,7 @@ class BaseTrainer(ABC):
         """Derived classes should implement this function."""
 
     @torch.no_grad()
-    def validate(self, split="val", disable_tqdm=False):
+    def validate(self, split: str = "val", disable_tqdm: bool = False):
         ensure_fitted(self._unwrapped_model, warn=True)
 
         if distutils.is_master():
@@ -708,7 +723,7 @@ class BaseTrainer(ABC):
     def _compute_loss(self, out, batch_list):
         """Derived classes should implement this function."""
 
-    def _backward(self, loss):
+    def _backward(self, loss) -> None:
         self.optimizer.zero_grad()
         loss.backward()
         # Scale down the gradients of shared parameters
@@ -743,7 +758,9 @@ class BaseTrainer(ABC):
         if self.ema:
             self.ema.update()
 
-    def save_results(self, predictions, results_file, keys):
+    def save_results(
+        self, predictions, results_file: Optional[str], keys
+    ) -> None:
         if results_file is None:
             return
 
@@ -779,18 +796,24 @@ class BaseTrainer(ABC):
             # Because of how distributed sampler works, some system ids
             # might be repeated to make no. of samples even across GPUs.
             _, idx = np.unique(gather_results["ids"], return_index=True)
-            gather_results["ids"] = np.array(gather_results["ids"])[idx]
+            gather_results["ids"] = np.array(
+                gather_results["ids"],
+            )[idx]
             for k in keys:
                 if k == "forces":
                     gather_results[k] = np.concatenate(
-                        np.array(gather_results[k])[idx]
+                        np.array(gather_results[k], dtype=object)[idx]
                     )
                 elif k == "chunk_idx":
                     gather_results[k] = np.cumsum(
-                        np.array(gather_results[k])[idx]
+                        np.array(
+                            gather_results[k],
+                        )[idx]
                     )[:-1]
                 else:
-                    gather_results[k] = np.array(gather_results[k])[idx]
+                    gather_results[k] = np.array(
+                        gather_results[k],
+                    )[idx]
 
             logging.info(f"Writing results to {full_path}")
             np.savez_compressed(full_path, **gather_results)

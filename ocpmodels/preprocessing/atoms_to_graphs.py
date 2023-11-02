@@ -5,6 +5,8 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
+from typing import Optional
+
 import ase.db.sqlite
 import ase.io.trajectory
 import numpy as np
@@ -68,15 +70,15 @@ class AtomsToGraphs:
 
     def __init__(
         self,
-        max_neigh=200,
-        radius=6,
-        r_energy=False,
-        r_forces=False,
-        r_distances=False,
-        r_edges=True,
-        r_fixed=True,
-        r_pbc=False,
-    ):
+        max_neigh: int = 200,
+        radius: int = 6,
+        r_energy: bool = False,
+        r_forces: bool = False,
+        r_distances: bool = False,
+        r_edges: bool = True,
+        r_fixed: bool = True,
+        r_pbc: bool = False,
+    ) -> None:
         self.max_neigh = max_neigh
         self.radius = radius
         self.r_energy = r_energy
@@ -86,7 +88,7 @@ class AtomsToGraphs:
         self.r_edges = r_edges
         self.r_pbc = r_pbc
 
-    def _get_neighbors_pymatgen(self, atoms):
+    def _get_neighbors_pymatgen(self, atoms: ase.Atoms):
         """Preforms nearest neighbor search and returns edge index, distances,
         and cell offsets"""
         struct = AseAtomsAdaptor.get_structure(atoms)
@@ -126,14 +128,14 @@ class AtomsToGraphs:
 
         return edge_index, edge_distances, cell_offsets
 
-    def convert(
-        self,
-        atoms,
-    ):
+    def convert(self, atoms: ase.Atoms, sid=None):
         """Convert a single atomic stucture to a graph.
 
         Args:
             atoms (ase.atoms.Atoms): An ASE atoms object.
+
+            sid (uniquely identifying object): An identifier that can be used to track the structure in downstream
+            tasks. Common sids used in OCP datasets include unique strings or integers.
 
         Returns:
             data (torch_geometric.data.Data): A torch geometic data object with positions, atomic_numbers, tags,
@@ -144,7 +146,7 @@ class AtomsToGraphs:
         # set the atomic numbers, positions, and cell
         atomic_numbers = torch.Tensor(atoms.get_atomic_numbers())
         positions = torch.Tensor(atoms.get_positions())
-        cell = torch.Tensor(atoms.get_cell()).view(1, 3, 3)
+        cell = torch.Tensor(np.array(atoms.get_cell())).view(1, 3, 3)
         natoms = positions.shape[0]
         # initialized to torch.zeros(natoms) if tags missing.
         # https://wiki.fysik.dtu.dk/ase/_modules/ase/atoms.html#Atoms.get_tags
@@ -158,6 +160,10 @@ class AtomsToGraphs:
             natoms=natoms,
             tags=tags,
         )
+
+        # Optionally add a systemid (sid) to the object
+        if sid is not None:
+            data.sid = sid
 
         # optionally include other properties
         if self.r_edges:
@@ -194,7 +200,7 @@ class AtomsToGraphs:
     def convert_all(
         self,
         atoms_collection,
-        processed_file_path=None,
+        processed_file_path: Optional[str] = None,
         collate_and_save=False,
         disable_tqdm=False,
     ):
