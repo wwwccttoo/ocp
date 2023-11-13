@@ -23,7 +23,7 @@ from torch.utils.data import BatchSampler, DistributedSampler, Sampler
 from torch_geometric.data.data import BaseData
 
 from ocpmodels.common import distutils, gp_utils
-from ocpmodels.datasets import Plasmadata_list_collater, data_list_collater
+from ocpmodels.datasets import Plasmadata_list_collater_v2, data_list_collater
 
 
 class OCPDataParallel(torch.nn.DataParallel):
@@ -129,7 +129,7 @@ class ParallelPlasmaCollater:
 
     def __call__(self, data_list):
         if self.num_gpus in [0, 1]:  # adds cpu-only case
-            batch = Plasmadata_list_collater(
+            batch = Plasmadata_list_collater_v2(
                 data_list, otf_graph=self.otf_graph
             )
             return [batch]
@@ -151,7 +151,7 @@ class ParallelPlasmaCollater:
             split = split.tolist()
 
             return [
-                Plasmadata_list_collater(data_list[split[i] : split[i + 1]])
+                Plasmadata_list_collater_v2(data_list[split[i] : split[i + 1]])
                 for i in range(len(split) - 1)
             ]
 

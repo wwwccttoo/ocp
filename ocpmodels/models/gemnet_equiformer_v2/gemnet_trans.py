@@ -302,10 +302,31 @@ class GemNetTrans(BaseModel):
             dropout=0.0,
         )
 
+        # for forces
+        if self.attn_type == "base":
+            emb_size_taag = 1
+        else:
+            emb_size_taag = emb_size_edge
+
+        self.force_lin_query_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+        self.force_lin_key_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+        self.force_lin_value_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+
+        self.force_MHA = nn.MultiheadAttention(
+            embed_dim=emb_size_taag,
+            num_heads=num_heads,
+            bias=True,
+            dropout=0.0,
+        )
+
         if self.add_positional_embedding:
             self.MHA_positional_embedding = PositionalEncoding(
                 emb_size_atom, dropout=0.0, max_len=len(self.out_blocks)
             )
+            self.force_MHA_positional_embedding = PositionalEncoding(
+                emb_size_edge, dropout=0.0, max_len=len(self.out_blocks)
+            )
+
         if self.freeze:
             self.after_freeze_IB = torch.nn.ModuleList(
                 [
@@ -347,6 +368,7 @@ class GemNetTrans(BaseModel):
             )
 
             self.out_energy = Dense(emb_size_atom, num_targets)
+            self.out_forces = Dense(emb_size_edge, num_targets)
         # this is different from the one used on TAAG, it is a universal scaling file loading function
         load_scales_compat(self, scale_file)
 
@@ -646,9 +668,11 @@ class GemNetTrans(BaseModel):
 
         # Implementing attention across pretrained blocks
         E_all = torch.stack(E_all, dim=0)
+        F_all = torch.stack(F_all, dim=0)
 
         if self.add_positional_embedding:
             E_all = self.MHA_positional_embedding(E_all)
+            F_all = self.force_MHA_positional_embedding(F_all)
 
         # no force in the original TAAG paper
         # TODO: need to add it in future!!!
@@ -661,6 +685,13 @@ class GemNetTrans(BaseModel):
             E_t = torch.bmm(alpha, E_all)
             E_t = torch.sum(E_t, dim=0)
 
+            alpha = torch.bmm(F_all, torch.transpose(F_all, 1, 2))
+            alpha = alpha / math.sqrt(F_all.shape[-1])
+            alpha = self.softmax(alpha)
+
+            F_t = torch.bmm(alpha, F_all)
+            F_t = torch.sum(F_t, dim=0)
+
         elif self.attn_type == "multi":
 
             q = self.lin_query_MHA(E_all)
@@ -670,8 +701,16 @@ class GemNetTrans(BaseModel):
             E_t, w = self.MHA(q, k, v)
             E_t = torch.sum(E_t, dim=0)
 
+            q = self.force_lin_query_MHA(F_all)
+            k = self.force_lin_key_MHA(F_all)
+            v = self.force_lin_value_MHA(F_all)
+
+            F_t, w = self.force_MHA(q, k, v)
+            F_t = torch.sum(F_t, dim=0)
+
         if self.attn_type != "base":
             E_t = self.out_energy(E_t)
+            F_t = self.out_forces(F_t)
 
         if self.freeze:
             for i in range(self.after_freeze_numblocks):
@@ -689,7 +728,7 @@ class GemNetTrans(BaseModel):
                     idx_t=idx_t,
                 )
                 E, F = self.after_freeze_OB[i](h, m, rbf_out, idx_t)
-                F_st += F
+                F_t += F
                 E_t += E
 
         nMolecules = torch.max(batch) + 1
@@ -705,7 +744,7 @@ class GemNetTrans(BaseModel):
         if self.regress_forces:
             if self.direct_forces:
                 # map forces in edge directions
-                F_st_vec = F_st[:, :, None] * V_st[:, None, :]
+                F_st_vec = F_t[:, :, None] * V_st[:, None, :]
                 # (nEdges, num_targets, 3)
                 F_t = scatter(
                     F_st_vec,

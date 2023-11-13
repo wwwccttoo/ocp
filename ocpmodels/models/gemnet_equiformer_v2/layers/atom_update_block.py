@@ -204,7 +204,8 @@ class OutputBlock(AtomUpdateBlock):
             x_F_rbf = x_F * rbf_emb_F
             x_F = self.scale_rbf_F(x_F_rbf, ref=x_F)
 
-            x_F = self.out_forces(x_F)  # (nEdges, num_targets)
+            if self.attn_type == "base":
+                x_F = self.out_forces(x_F)  # (nEdges, num_targets)
         else:
             x_F = 0
         # ----------------------------------------------------------------------------------------------- #

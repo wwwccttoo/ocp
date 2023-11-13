@@ -14,7 +14,15 @@ from ocpmodels.common.utils import conditional_grad
 from ocpmodels.models.base import BaseModel
 
 from .equiformer_v2_plasma import EquiformerV2_plasma
+from .gaussian_rbf import GaussianRadialBasisLayer
 from .gemnet_trans import GemNetTrans
+from .layer_norm import (
+    EquivariantLayerNormArray,
+    EquivariantLayerNormArraySphericalHarmonics,
+    EquivariantRMSNormArraySphericalHarmonics,
+    EquivariantRMSNormArraySphericalHarmonicsV2,
+)
+from .so3 import SO3_LinearV2
 
 
 @registry.register_model("gemnet_equiformer_v2")
@@ -198,3 +206,35 @@ class GemnetEquiformer_V2(BaseModel):
             with torch.no_grad():
                 # proton embedding start with the hydrogen embedding
                 val[0, :] = para_dict[parent_key][1, :].detach().clone()
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        no_wd_list = []
+        named_parameters_list = [name for name, _ in self.named_parameters()]
+        for module_name, module in self.named_modules():
+            if "equiformer_part" in module_name and (
+                isinstance(module, torch.nn.Linear)
+                or isinstance(module, SO3_LinearV2)
+                or isinstance(module, torch.nn.LayerNorm)
+                or isinstance(module, EquivariantLayerNormArray)
+                or isinstance(
+                    module, EquivariantLayerNormArraySphericalHarmonics
+                )
+                or isinstance(
+                    module, EquivariantRMSNormArraySphericalHarmonics
+                )
+                or isinstance(
+                    module, EquivariantRMSNormArraySphericalHarmonicsV2
+                )
+                or isinstance(module, GaussianRadialBasisLayer)
+            ):
+                for parameter_name, _ in module.named_parameters():
+                    if isinstance(module, torch.nn.Linear) or isinstance(
+                        module, SO3_LinearV2
+                    ):
+                        if "weight" in parameter_name:
+                            continue
+                    global_parameter_name = module_name + "." + parameter_name
+                    assert global_parameter_name in named_parameters_list
+                    no_wd_list.append(global_parameter_name)
+        return set(no_wd_list)
