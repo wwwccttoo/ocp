@@ -384,7 +384,10 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
         loss.append(
             energy_mult
             * self.loss_fn["energy"](
-                out["equiformer_energy"] * energies_need_not_to_change, 0.0
+                out["equiformer_energy"] * energies_need_not_to_change,
+                torch.zeros_like(out["equiformer_energy"]).to(
+                    device=self.device, dtype=out["equiformer_energy"].dtype
+                ),
             )
         )
 
