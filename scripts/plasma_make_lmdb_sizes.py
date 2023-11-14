@@ -12,7 +12,10 @@ import numpy as np
 from tqdm import tqdm
 
 from ocpmodels.common.typing import assert_is_instance
-from ocpmodels.datasets import SinglePointLmdbDataset, TrajectoryLmdbDataset
+from ocpmodels.datasets import (
+    SinglePointPlasmaDataset_v2,
+    TrajectoryPlasmaDataset_v2,
+)
 
 
 def get_data(index):
@@ -29,10 +32,10 @@ def main(args) -> None:
     path = assert_is_instance(args.data_path, str)
     global dataset
     if os.path.isdir(path):
-        dataset = TrajectoryLmdbDataset({"src": path})
+        dataset = TrajectoryPlasmaDataset_v2({"src": path})
         outpath = os.path.join(path, "metadata.npz")
     elif os.path.isfile(path):
-        dataset = SinglePointLmdbDataset({"src": path})
+        dataset = SinglePointPlasmaDataset_v2({"src": path})
         outpath = os.path.join(os.path.dirname(path), "metadata.npz")
 
     output_indices = range(len(dataset))
