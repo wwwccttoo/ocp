@@ -38,10 +38,14 @@ def cosine_lr_lambda(current_step: int, scheduler_params):
 
 class CosineLRLambda:
     def __init__(self, scheduler_params) -> None:
-        self.warmup_epochs = aii(scheduler_params["warmup_epochs"], int)
-        self.lr_warmup_factor = aii(scheduler_params["warmup_factor"], float)
-        self.max_epochs = aii(scheduler_params["epochs"], int)
-        self.lr_min_factor = aii(scheduler_params["lr_min_factor"], float)
+        # self.warmup_epochs = aii(scheduler_params["warmup_epochs"], int)
+        # self.lr_warmup_factor = aii(scheduler_params["warmup_factor"], float)
+        # self.max_epochs = aii(scheduler_params["epochs"], int)
+        # self.lr_min_factor = aii(scheduler_params["lr_min_factor"], float)
+        self.warmup_epochs = scheduler_params["warmup_epochs"]
+        self.lr_warmup_factor = scheduler_params["warmup_factor"]
+        self.max_epochs = scheduler_params["epochs"]
+        self.lr_min_factor = scheduler_params["lr_min_factor"]
 
     def __call__(self, current_step: int):
         # `warmup_epochs` is already multiplied with the num of iterations

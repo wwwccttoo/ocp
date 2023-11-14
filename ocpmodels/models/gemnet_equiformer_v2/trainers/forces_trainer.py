@@ -159,12 +159,12 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
             for k in scheduler_params.keys():
                 if "epochs" in k:
                     if isinstance(scheduler_params[k], (int, float)):
-                        scheduler_params[k] = int(
-                            multiply(scheduler_params[k], n_iter_per_epoch)
+                        scheduler_params[k] = multiply(
+                            scheduler_params[k], n_iter_per_epoch
                         )
                     elif isinstance(scheduler_params[k], list):
                         scheduler_params[k] = [
-                            int(x)
+                            x
                             for x in multiply(
                                 scheduler_params[k], n_iter_per_epoch
                             )
@@ -401,6 +401,11 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                 force_need_to_change = force_need_to_change + [0.0] * origin
                 force_need_not_to_change = (
                     force_need_not_to_change + [1.0] * origin
+                )
+            else:
+                force_need_to_change = force_need_to_change + [1.0] * origin
+                force_need_not_to_change = (
+                    force_need_not_to_change + [0.0] * origin
                 )
 
         force_need_to_change = torch.tensor(force_need_to_change).to(
@@ -713,6 +718,8 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
         ):
             if origin == modify:
                 force_need_to_change = force_need_to_change + [0.0] * origin
+            else:
+                force_need_to_change = force_need_to_change + [1.0] * origin
 
         force_need_to_change = torch.tensor(force_need_to_change).to(
             self.device

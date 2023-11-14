@@ -170,8 +170,17 @@ class GemnetEquiformer_V2(BaseModel):
         kwargs["max_neighbors"] = kwargs["max_neighbors_gh"]
         kwargs["num_heads"] = kwargs["num_heads_gh"]
         self.equiformer_part = EquiformerV2_plasma(**kwargs)
+        if kwargs.get("pretrained", None):
+            try:
+                self.load_state_dict(
+                    torch.load(kwargs["pretrained"]), strict=True
+                )
+                print("Successfully load the pretrained model!!!")
+            except Exception:
+                print("The pretrained model path has problems, please check.")
         if kwargs.get("freeze_equiformer_embedding", False):
-            self.free_equiformer_embedding()
+            print("The atom embedding of the equiformer is fixed!")
+            self.freeze_equiformer_embedding()
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
