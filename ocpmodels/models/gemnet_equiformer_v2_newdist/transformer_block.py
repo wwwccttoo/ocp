@@ -77,6 +77,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
         use_gate_act: bool = False,
         use_sep_s2_act: bool = True,
         alpha_drop: float = 0.0,
+        atom_emb_drop: float = 0.0,
     ):
         super(SO2EquivariantGraphAttention, self).__init__()
 
@@ -192,6 +193,8 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
         if alpha_drop != 0.0:
             self.alpha_dropout = torch.nn.Dropout(alpha_drop)
 
+        self.atom_emb_dropout = torch.nn.Dropout(atom_emb_drop)
+
         if self.use_gate_act:
             self.gate_act = GateActivation(
                 lmax=max(self.lmax_list),
@@ -247,26 +250,30 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
                 edge_index[1]
             ]  # Target atom atomic number
             # source_embedding = self.source_embedding(source_element)
-            source_embedding = nn.functional.embedding(
-                source_element,
-                torch.cat(
-                    [
-                        self.source_proton_embedding.weight,
-                        self.source_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            source_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    source_element,
+                    torch.cat(
+                        [
+                            self.source_proton_embedding.weight,
+                            self.source_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
             # target_embedding = self.target_embedding(target_element)
-            target_embedding = nn.functional.embedding(
-                target_element,
-                torch.cat(
-                    [
-                        self.target_proton_embedding.weight,
-                        self.target_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            target_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    target_element,
+                    torch.cat(
+                        [
+                            self.target_proton_embedding.weight,
+                            self.target_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
             x_edge = torch.cat(
                 (edge_distance, source_embedding, target_embedding), dim=1
@@ -648,6 +655,7 @@ class TransBlockV2(torch.nn.Module):
         alpha_drop: float = 0.0,
         drop_path_rate: float = 0.0,
         proj_drop: float = 0.0,
+        atom_emb_drop: float = 0.0,
     ) -> None:
         super(TransBlockV2, self).__init__()
 
@@ -678,6 +686,7 @@ class TransBlockV2(torch.nn.Module):
             use_gate_act=use_gate_act,
             use_sep_s2_act=use_sep_s2_act,
             alpha_drop=alpha_drop,
+            atom_emb_drop=atom_emb_drop,
         )
 
         self.drop_path = (

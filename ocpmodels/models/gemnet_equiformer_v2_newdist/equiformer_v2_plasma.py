@@ -153,6 +153,7 @@ class EquiformerV2_plasma(BaseModel):
         alpha_drop: float = 0.1,
         drop_path_rate: float = 0.05,
         proj_drop: float = 0.0,
+        atom_emb_drop: float = 0.0,
         weight_init: str = "normal",
         enforce_max_neighbors_strictly: bool = True,
         avg_num_nodes: Optional[float] = None,
@@ -217,6 +218,9 @@ class EquiformerV2_plasma(BaseModel):
         self.alpha_drop = alpha_drop
         self.drop_path_rate = drop_path_rate
         self.proj_drop = proj_drop
+        self.atom_emb_drop = atom_emb_drop
+
+        self.atom_emb_dropout = torch.nn.Dropout(self.atom_emb_drop)
 
         self.avg_num_nodes = avg_num_nodes or _AVG_NUM_NODES
         self.avg_degree = avg_degree or _AVG_DEGREE
@@ -326,6 +330,7 @@ class EquiformerV2_plasma(BaseModel):
             self.edge_channels_list,
             self.block_use_atom_edge_embedding,
             rescale_factor=self.avg_degree,
+            atom_emb_drop=self.atom_emb_drop,
         )
 
         # Initialize the blocks for each layer of EquiformerV2
@@ -359,6 +364,7 @@ class EquiformerV2_plasma(BaseModel):
                 self.alpha_drop,
                 self.drop_path_rate,
                 self.proj_drop,
+                self.atom_emb_drop,
             )
             self.blocks.append(block)
 
@@ -403,6 +409,7 @@ class EquiformerV2_plasma(BaseModel):
                 self.use_gate_act,
                 self.use_sep_s2_act,
                 alpha_drop=0.0,
+                atom_emb_drop=self.atom_emb_drop,
             )
 
         if self.load_energy_lin_ref:
@@ -497,29 +504,33 @@ class EquiformerV2_plasma(BaseModel):
                 # x.embedding[:, offset_res, :] = self.sphere_embedding(
                 #    atomic_numbers
                 # )
-                x.embedding[:, offset_res, :] = nn.functional.embedding(
-                    atomic_numbers,
-                    torch.cat(
-                        [
-                            self.sphere_proton_embedding.weight,
-                            self.sphere_embedding.weight[1:, :],
-                        ],
-                        dim=0,
-                    ),
+                x.embedding[:, offset_res, :] = self.atom_emb_dropout(
+                    nn.functional.embedding(
+                        atomic_numbers,
+                        torch.cat(
+                            [
+                                self.sphere_proton_embedding.weight,
+                                self.sphere_embedding.weight[1:, :],
+                            ],
+                            dim=0,
+                        ),
+                    )
                 )
             else:
                 # x.embedding[:, offset_res, :] = self.sphere_embedding(
                 #    atomic_numbers
                 # )[:, offset : offset + self.sphere_channels]
-                x.embedding[:, offset_res, :] = nn.functional.embedding(
-                    atomic_numbers,
-                    torch.cat(
-                        [
-                            self.sphere_proton_embedding.weight,
-                            self.sphere_embedding.weight[1:, :],
-                        ],
-                        dim=0,
-                    ),
+                x.embedding[:, offset_res, :] = self.atom_emb_dropout(
+                    nn.functional.embedding(
+                        atomic_numbers,
+                        torch.cat(
+                            [
+                                self.sphere_proton_embedding.weight,
+                                self.sphere_embedding.weight[1:, :],
+                            ],
+                            dim=0,
+                        ),
+                    )
                 )[:, offset : offset + self.sphere_channels]
             offset = offset + self.sphere_channels
             offset_res = offset_res + int((self.lmax_list[i] + 1) ** 2)
@@ -535,25 +546,29 @@ class EquiformerV2_plasma(BaseModel):
             ]  # Target atom atomic number
             # source_embedding = self.source_embedding(source_element)
             # target_embedding = self.target_embedding(target_element)
-            source_embedding = nn.functional.embedding(
-                source_element,
-                torch.cat(
-                    [
-                        self.source_proton_embedding.weight,
-                        self.source_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            source_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    source_element,
+                    torch.cat(
+                        [
+                            self.source_proton_embedding.weight,
+                            self.source_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
-            target_embedding = nn.functional.embedding(
-                target_element,
-                torch.cat(
-                    [
-                        self.target_proton_embedding.weight,
-                        self.target_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            target_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    target_element,
+                    torch.cat(
+                        [
+                            self.target_proton_embedding.weight,
+                            self.target_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
             edge_distance = torch.cat(
                 (edge_distance, source_embedding, target_embedding), dim=1

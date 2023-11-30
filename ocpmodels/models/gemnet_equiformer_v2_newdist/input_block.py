@@ -39,6 +39,7 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         edge_channels_list,
         use_atom_edge_embedding: bool,
         rescale_factor,
+        atom_emb_drop: float = 0.0,
     ):
         super(EdgeDegreeEmbedding, self).__init__()
         self.sphere_channels = sphere_channels
@@ -56,6 +57,8 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         self.max_num_elements = max_num_elements
         self.edge_channels_list = copy.deepcopy(edge_channels_list)
         self.use_atom_edge_embedding = use_atom_edge_embedding
+
+        self.atom_emb_dropout = torch.nn.Dropout(atom_emb_drop)
 
         if self.use_atom_edge_embedding:
             self.source_proton_embedding = nn.Embedding(
@@ -96,26 +99,30 @@ class EdgeDegreeEmbedding(torch.nn.Module):
                 edge_index[1]
             ]  # Target atom atomic number
             # source_embedding = self.source_embedding(source_element)
-            source_embedding = nn.functional.embedding(
-                source_element,
-                torch.cat(
-                    [
-                        self.source_proton_embedding.weight,
-                        self.source_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            source_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    source_element,
+                    torch.cat(
+                        [
+                            self.source_proton_embedding.weight,
+                            self.source_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
             # target_embedding = self.target_embedding(target_element)
-            target_embedding = nn.functional.embedding(
-                target_element,
-                torch.cat(
-                    [
-                        self.target_proton_embedding.weight,
-                        self.target_embedding.weight[1:, :],
-                    ],
-                    dim=0,
-                ),
+            target_embedding = self.atom_emb_dropout(
+                nn.functional.embedding(
+                    target_element,
+                    torch.cat(
+                        [
+                            self.target_proton_embedding.weight,
+                            self.target_embedding.weight[1:, :],
+                        ],
+                        dim=0,
+                    ),
+                )
             )
             x_edge = torch.cat(
                 (edge_distance, source_embedding, target_embedding), dim=1
