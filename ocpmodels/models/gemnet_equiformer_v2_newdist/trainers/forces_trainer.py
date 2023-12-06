@@ -610,9 +610,9 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                                 )
                                 * signify_factor_mask
                             )[mask],
-                            force_target[mask],
+                            (force_target * signify_factor_mask)[mask],
                             natoms=natoms[mask],
-                            batch_size=batch_list[0].natoms.shape[0],
+                            batch_size=batch_list[0].natoms_gh.shape[0],
                         )
                         # consider configurations without proton(s)
                         force_loss += force_mult * self.loss_fn["force"](
@@ -625,7 +625,7 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                                 device=self.device, dtype=force_target.dtype
                             )[mask],
                             natoms=natoms[mask],
-                            batch_size=batch_list[0].natoms.shape[0],
+                            batch_size=batch_list[0].natoms_gh.shape[0],
                         )
                         loss.append(force_loss)
                     else:
@@ -638,7 +638,7 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                                 )
                                 * signify_factor_mask
                             )[mask],
-                            force_target[mask],
+                            (force_target * signify_factor_mask)[mask],
                         )
                         # consider configurations without proton(s)
                         force_loss += force_mult * self.loss_fn["force"](
@@ -662,10 +662,10 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                             )
                             * signify_factor_mask
                         ),
-                        force_target,
+                        force_target * signify_factor_mask,
                     )
                     # consider configurations without proton(s)
-                    force_loss = force_mult * self.loss_fn["force"](
+                    force_loss += force_mult * self.loss_fn["force"](
                         (
                             equiformer_forces
                             * force_need_not_to_change

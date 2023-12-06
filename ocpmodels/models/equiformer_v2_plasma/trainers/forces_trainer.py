@@ -55,8 +55,8 @@ def add_weight_decay(model, weight_decay, skip_list=()):
     return params, name_no_wd
 
 
-@registry.register_trainer("gemnet_equiformerv2_plasma_forces")
-class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
+@registry.register_trainer("equiformerv2_plasma_forces_newdist_direct")
+class EquiformerV2ForcesTrainer(ForcesTrainer):
     # This trainer does a few things differently from the parent forces trainer:
     # - Different way of setting up model parameters with no weight decay.
     # - Support for cosine LR scheduler.
@@ -226,8 +226,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
         ):
             with torch.cuda.amp.autocast(enabled=self.scaler is not None):
                 out = self._forward(batch_list)
-                # create energy and forces attributes
-                out = self.create_predicted_energy_forces(out, batch_list)
 
             if self.normalizers is not None and "target" in self.normalizers:
                 out["energy"] = self.normalizers["target"].denorm(
@@ -244,11 +242,9 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                     )
                 ]
                 predictions["id"].extend(systemids)
-                # use the original natoms here for consistency
                 batch_natoms = torch.cat(
                     [batch.natoms_gh for batch in batch_list]
                 )
-                # use the original fixed here for consistency
                 batch_fixed = torch.cat(
                     [batch.fixed_gh for batch in batch_list]
                 )
@@ -318,139 +314,67 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
 
     def _forward(self, batch_list):
         # forward pass.
-        gemnet_out, equiformer_out = self.model(batch_list)
         if self.config["model_attributes"].get("regress_forces", True):
-            gemnet_out_energy, gemnet_out_forces = gemnet_out
-            equiformer_energy, equiformer_forces = equiformer_out
+            out_energy, out_forces = self.model(batch_list)
         else:
-            gemnet_out_energy = gemnet_out
-            equiformer_energy = equiformer_out
+            out_energy = self.model(batch_list)
 
-        if gemnet_out_energy.shape[-1] == 1:
-            gemnet_out_energy = gemnet_out_energy.view(-1)
-
-        if equiformer_energy.shape[-1] == 1:
-            equiformer_energy = equiformer_energy.view(-1)
+        if out_energy.shape[-1] == 1:
+            out_energy = out_energy.view(-1)
 
         out = {
-            "gemnet_energy": gemnet_out_energy,
-            "equiformer_energy": equiformer_energy,
+            "energy": out_energy,
         }
 
         if self.config["model_attributes"].get("regress_forces", True):
-            out["gemnet_forces"] = gemnet_out_forces
-            out["equiformer_forces"] = equiformer_forces
+            out["forces"] = out_forces
 
         return out
 
     def _compute_loss(self, out, batch_list) -> int:
         loss = []
 
-        # Energy loss, for configurations with proton(s).
+        # Energy loss.
         energy_target = torch.cat(
             [batch.y.to(self.device) for batch in batch_list], dim=0
-        )
-        # natoms after deleting proton(s)
-        natoms_modified = torch.cat(
-            [batch.natoms.to(self.device) for batch in batch_list], dim=0
-        )
-        # natoms before deleting proton(s)
-        natoms_original = torch.cat(
-            [batch.natoms_gh.to(self.device) for batch in batch_list], dim=0
-        )
-        energies_need_to_change = (natoms_modified != natoms_original).int()
-        energies_need_to_change = energies_need_to_change.reshape(
-            out["gemnet_energy"].shape
         )
         if self.normalizer.get("normalize_labels", False):
             energy_target = self.normalizers["target"].norm(energy_target)
         energy_mult = self.config["optim"].get("energy_coefficient", 1)
         loss.append(
-            energy_mult
-            * self.loss_fn["energy"](
-                out["gemnet_energy"]
-                + out["equiformer_energy"] * energies_need_to_change,
-                energy_target,
-            )
+            energy_mult * self.loss_fn["energy"](out["energy"], energy_target)
         )
-
-        # Extra energy loss, for configurations without proton(s).
-        energies_need_not_to_change = (
-            natoms_modified == natoms_original
-        ).int()
-        energies_need_not_to_change = energies_need_not_to_change.reshape(
-            out["gemnet_energy"].shape
-        )
-        loss.append(
-            energy_mult
-            * self.loss_fn["energy"](
-                out["equiformer_energy"] * energies_need_not_to_change,
-                torch.zeros_like(out["equiformer_energy"]).to(
-                    device=self.device, dtype=out["equiformer_energy"].dtype
-                ),
-            )
-        )
-
-        # Build mask for force
-        force_need_to_change = []
-        force_need_not_to_change = []
-        for origin, modify in zip(
-            natoms_original.cpu().tolist(), natoms_modified.cpu().tolist()
-        ):
-            if origin == modify:
-                force_need_to_change = force_need_to_change + [0.0] * origin
-                force_need_not_to_change = (
-                    force_need_not_to_change + [1.0] * origin
-                )
-            else:
-                force_need_to_change = force_need_to_change + [1.0] * origin
-                force_need_not_to_change = (
-                    force_need_not_to_change + [0.0] * origin
-                )
-
-        force_need_to_change = torch.tensor(force_need_to_change).to(
-            self.device
-        )
-        force_need_not_to_change = torch.tensor(force_need_not_to_change).to(
-            self.device
-        )
-
-        if len(force_need_to_change.shape) == 1:
-            force_need_to_change = force_need_to_change.unsqueeze(-1)
-            force_need_not_to_change = force_need_not_to_change.unsqueeze(-1)
 
         # Force loss.
         if self.config["model_attributes"].get("regress_forces", True):
-            # need special care here
-            # under the existence of proton
-            # the output shapes of gemnet and equiformer are different
-
-            # use the force_gh here, which is the original shape
             force_target = torch.cat(
                 [batch.force_gh.to(self.device) for batch in batch_list], dim=0
             )
-            atomic_numbers = torch.cat(
+
+            check_signify_atomic_numbers = torch.cat(
                 [batch.atomic_numbers_gh for batch in batch_list], dim=0
-            ).tolist()
+            )
 
-            assert len(atomic_numbers) == force_target.shape[0]
+            if self.config["optim"].get("signify_minor_atoms", False):
+                # we are excluding the Al2O3 support
+                atoms_to_signify = (check_signify_atomic_numbers != 13) & (
+                    check_signify_atomic_numbers != 8
+                )
+                signify_factor = self.config["optim"].get(
+                    "signify_factor", 100
+                )
+            else:
+                atoms_to_signify = check_signify_atomic_numbers < 0
+                signify_factor = self.config["optim"].get("signify_factor", 1)
 
-            gemnet_forces = out["gemnet_forces"]
-            equiformer_forces = out["equiformer_forces"]
-
-            # we need to manually make up [0., 0., 0.] vector here for gemnet forces
-            for i in range(len(atomic_numbers)):
-                if int(atomic_numbers[i]) == 0:
-                    left_part = gemnet_forces[:i, :]
-                    right_part = gemnet_forces[i:, :]
-                    append_part = (
-                        torch.zeros(3)
-                        .view(1, -1)
-                        .to(device=self.device, dtype=gemnet_forces.dtype)
-                    )
-                    gemnet_forces = torch.cat(
-                        [left_part, append_part, right_part], dim=0
-                    )
+            # create the signify_factor_mask for minor atoms!
+            signify_factor_mask = torch.ones_like(force_target).to(
+                force_target
+            )
+            signify_mask = atoms_to_signify.unsqueeze(-1).repeat(
+                1, force_target.shape[-1]
+            )
+            signify_factor_mask[signify_mask] = signify_factor
 
             if self.normalizer.get("normalize_labels", False):
                 force_target = self.normalizers["grad_target"].norm(
@@ -464,7 +388,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                 # handle tag specific weights as introduced in forcenet
                 assert len(tag_specific_weights) == 3
 
-                # use the original tags here for consistency
                 batch_tags = torch.cat(
                     [
                         batch.tags_gh.float().to(self.device)
@@ -480,47 +403,22 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                 if self.config["optim"].get("loss_force", "l2mae") == "l2mae":
                     # zero out nans, if any
                     found_nans_or_infs = not torch.all(
-                        gemnet_forces.isfinite()
+                        out["forces"].isfinite()
                     )
                     if found_nans_or_infs is True:
-                        logging.warning(
-                            "Found nans while computing loss for gemnet"
-                        )
-                        gemnet_forces = torch.nan_to_num(
-                            gemnet_forces, nan=0.0
+                        logging.warning("Found nans while computing loss")
+                        out["forces"] = torch.nan_to_num(
+                            out["forces"], nan=0.0
                         )
 
-                    found_nans_or_infs = not torch.all(
-                        equiformer_forces.isfinite()
-                    )
-                    if found_nans_or_infs is True:
-                        logging.warning(
-                            "Found nans while computing loss for equiformer"
-                        )
-                        equiformer_forces = torch.nan_to_num(
-                            equiformer_forces, nan=0.0
-                        )
-
-                    # consider configurations with proton(s)
-                    dists_change = torch.norm(
-                        gemnet_forces
-                        + equiformer_forces * force_need_to_change
-                        - force_target,
+                    dists = torch.norm(
+                        (out["forces"] - force_target) * signify_factor_mask,
                         p=2,
                         dim=-1,
                     )
+                    weighted_dists_sum = (dists * weight).sum()
 
-                    # consider configurations without proton(s)
-                    dists_not_change = torch.norm(
-                        equiformer_forces * force_need_not_to_change,
-                        p=2,
-                        dim=-1,
-                    )
-                    weighted_dists_sum = (
-                        (dists_change + dists_not_change) * weight
-                    ).sum()
-
-                    num_samples = gemnet_forces.shape[0]
+                    num_samples = out["forces"].shape[0]
                     num_samples = distutils.all_reduce(
                         num_samples, device=self.device
                     )
@@ -540,7 +438,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                 # Force coefficient = 30 has been working well for us.
                 force_mult = self.config["optim"].get("force_coefficient", 30)
                 if self.config["task"].get("train_on_free_atoms", False):
-                    # use the original fixed here for consistency
                     fixed = torch.cat(
                         [
                             batch.fixed_gh.to(self.device)
@@ -556,7 +453,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                         force_mult = self.config["optim"].get(
                             "force_coefficient", 1
                         )
-                        # use the original natoms here for consistency
                         natoms = torch.cat(
                             [
                                 batch.natoms_gh.to(self.device)
@@ -564,64 +460,29 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                             ]
                         )
                         natoms = torch.repeat_interleave(natoms, natoms)
-                        # consider configurations with proton(s)
                         force_loss = force_mult * self.loss_fn["force"](
-                            (
-                                gemnet_forces
-                                + equiformer_forces * force_need_to_change
-                            )[mask],
-                            force_target[mask],
+                            (out["forces"] * signify_factor_mask)[mask],
+                            (force_target * signify_factor_mask)[mask],
                             natoms=natoms[mask],
-                            batch_size=batch_list[0].natoms.shape[0],
-                        )
-                        # consider configurations without proton(s)
-                        force_loss += force_mult * self.loss_fn["force"](
-                            (equiformer_forces * force_need_not_to_change)[
-                                mask
-                            ],
-                            torch.zeros_like(force_target).to(
-                                device=self.device, dtype=force_target.dtype
-                            )[mask],
-                            natoms=natoms[mask],
-                            batch_size=batch_list[0].natoms.shape[0],
+                            batch_size=batch_list[0].natoms_gh.shape[0],
                         )
                         loss.append(force_loss)
                     else:
-                        # consider configurations with proton(s)
-                        force_loss = force_mult * self.loss_fn["force"](
-                            (
-                                gemnet_forces
-                                + equiformer_forces * force_need_to_change
-                            )[mask],
-                            force_target[mask],
+                        loss.append(
+                            force_mult
+                            * self.loss_fn["force"](
+                                (out["forces"] * signify_factor_mask)[mask],
+                                (force_target * signify_factor_mask)[mask],
+                            )
                         )
-                        # consider configurations without proton(s)
-                        force_loss += force_mult * self.loss_fn["force"](
-                            (equiformer_forces * force_need_not_to_change)[
-                                mask
-                            ],
-                            torch.zeros_like(force_target).to(
-                                device=self.device, dtype=force_target.dtype
-                            )[mask],
-                        )
-                        loss.append(force_loss)
                 else:
-                    # consider configurations with proton(s)
-                    force_loss = force_mult * self.loss_fn["force"](
-                        (
-                            gemnet_forces
-                            + equiformer_forces * force_need_to_change
-                        ),
-                        force_target,
+                    loss.append(
+                        force_mult
+                        * self.loss_fn["force"](
+                            out["forces"] * signify_factor_mask,
+                            force_target * signify_factor_mask,
+                        )
                     )
-                    # consider configurations without proton(s)
-                    force_loss += force_mult * self.loss_fn["force"](
-                        (equiformer_forces * force_need_not_to_change),
-                        torch.zeros_like(force_target).to(
-                            device=self.device, dtype=force_target.dtype
-                        ),
-                    )
-                    loss.append(force_loss)
 
         # Sanity check to make sure the compute graph is correct.
         for lc in loss:
@@ -631,8 +492,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
         return loss
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
-        out = self.create_predicted_energy_forces(out, batch_list)
-        # use the original natoms here for consistency
         natoms = torch.cat(
             [batch.natoms_gh.to(self.device) for batch in batch_list], dim=0
         )
@@ -641,7 +500,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
             "energy": torch.cat(
                 [batch.y.to(self.device) for batch in batch_list], dim=0
             ),
-            # use the force_gh here, which is the original shape
             "forces": torch.cat(
                 [batch.force_gh.to(self.device) for batch in batch_list], dim=0
             ),
@@ -651,7 +509,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
         out["natoms"] = natoms
 
         if self.config["task"].get("eval_on_free_atoms", True):
-            # use the original fixed here for consistency
             fixed = torch.cat(
                 [batch.fixed_gh.to(self.device) for batch in batch_list]
             )
@@ -677,73 +534,3 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
 
         metrics = evaluator.eval(out, target, prev_metrics=metrics)
         return metrics
-
-    def create_predicted_energy_forces(self, out, batch_list):
-        target_forces = torch.cat(
-            [batch.force_gh.to(self.device) for batch in batch_list], dim=0
-        )
-
-        # create energy attribute for out!!!
-        # natoms after deleting proton(s)
-        natoms_modified = torch.cat(
-            [batch.natoms.to(self.device) for batch in batch_list], dim=0
-        )
-        # natoms before deleting proton(s)
-        natoms_original = torch.cat(
-            [batch.natoms_gh.to(self.device) for batch in batch_list], dim=0
-        )
-        energies_need_to_change = (natoms_modified != natoms_original).int()
-        energies_need_to_change = energies_need_to_change.reshape(
-            out["gemnet_energy"].shape
-        )
-        out["energy"] = (
-            out["gemnet_energy"]
-            + out["equiformer_energy"] * energies_need_to_change
-        )
-
-        # create forces attribute for out!!!
-        atomic_numbers = torch.cat(
-            [batch.atomic_numbers_gh for batch in batch_list], dim=0
-        ).tolist()
-
-        assert len(atomic_numbers) == target_forces.shape[0]
-
-        gemnet_forces = out["gemnet_forces"]
-        equiformer_forces = out["equiformer_forces"]
-
-        # Build mask for force
-        force_need_to_change = []
-        for origin, modify in zip(
-            natoms_original.cpu().tolist(), natoms_modified.cpu().tolist()
-        ):
-            if origin == modify:
-                force_need_to_change = force_need_to_change + [0.0] * origin
-            else:
-                force_need_to_change = force_need_to_change + [1.0] * origin
-
-        force_need_to_change = torch.tensor(force_need_to_change).to(
-            self.device
-        )
-
-        if len(force_need_to_change.shape) == 1:
-            force_need_to_change = force_need_to_change.unsqueeze(-1)
-
-        # we need to manually make up [0., 0., 0.] vector here for gemnet forces
-        for i in range(len(atomic_numbers)):
-            if int(atomic_numbers[i]) == 0:
-                left_part = gemnet_forces[:i, :]
-                right_part = gemnet_forces[i:, :]
-                append_part = (
-                    torch.zeros(3)
-                    .view(1, -1)
-                    .to(device=self.device, dtype=gemnet_forces.dtype)
-                )
-                gemnet_forces = torch.cat(
-                    [left_part, append_part, right_part], dim=0
-                )
-
-        out["forces"] = (
-            gemnet_forces + equiformer_forces * force_need_to_change
-        )
-
-        return out
