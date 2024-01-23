@@ -463,14 +463,6 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
             )
             signify_factor_mask[signify_mask] = signify_factor
 
-            print("force_target: ", force_target.shape)
-            print("signify_mask: ", signify_mask.shape)
-            print("signify_factor_mask: ", signify_factor_mask.shape)
-            print(
-                "if exist: ",
-                (signify_factor_mask == signify_factor).all(-1).sum(),
-            )
-
             # we need to manually make up [0., 0., 0.] vector here for gemnet forces
             for i in range(len(atomic_numbers)):
                 if int(atomic_numbers[i]) == 0:
