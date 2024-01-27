@@ -78,6 +78,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
         use_sep_s2_act: bool = True,
         alpha_drop: float = 0.0,
         atom_emb_drop: float = 0.0,
+        quantization: bool = False,
     ):
         super(SO2EquivariantGraphAttention, self).__init__()
 
@@ -102,19 +103,37 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
         self.use_atom_edge_embedding = use_atom_edge_embedding
         self.use_m_share_rad = use_m_share_rad
 
+        self.quantization = quantization
+
         if self.use_atom_edge_embedding:
-            self.source_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.source_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
-            self.target_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.target_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
+            if self.quantization:
+                import bitsandbytes as bnb
+
+                self.source_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+            else:
+                self.source_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
             nn.init.uniform_(self.source_embedding.weight.data, -0.001, 0.001)
             nn.init.uniform_(self.target_embedding.weight.data, -0.001, 0.001)
             self.edge_channels_list[0] = (
@@ -151,7 +170,9 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
             self.edge_channels_list = self.edge_channels_list + [
                 2 * self.sphere_channels * (max(self.lmax_list) + 1)
             ]
-            self.rad_func = RadialFunction(self.edge_channels_list)
+            self.rad_func = RadialFunction(
+                self.edge_channels_list, self.quantization
+            )
             expand_index = torch.zeros([(max(self.lmax_list) + 1) ** 2]).long()
             for lval in range(max(self.lmax_list) + 1):
                 start_idx = lval**2
@@ -170,6 +191,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
                 self.edge_channels_list if not self.use_m_share_rad else None
             ),
             extra_m0_output_channels=extra_m0_output_channels,  # for attention weights and/or gate activation
+            quantization=self.quantization,
         )
 
         if self.use_s2_act_attn:
@@ -224,6 +246,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
             extra_m0_output_channels=(
                 self.num_heads if self.use_s2_act_attn else None
             ),  # for attention weights
+            quantization=self.quantization,
         )
 
         self.proj = SO3_LinearV2(
@@ -458,6 +481,7 @@ class FeedForwardNetwork(torch.nn.Module):
         use_gate_act: bool = False,
         use_grid_mlp: bool = False,
         use_sep_s2_act: bool = True,
+        quantization: bool = False,
     ):
         super(FeedForwardNetwork, self).__init__()
         self.sphere_channels = sphere_channels
@@ -471,22 +495,35 @@ class FeedForwardNetwork(torch.nn.Module):
         self.use_gate_act = use_gate_act
         self.use_grid_mlp = use_grid_mlp
         self.use_sep_s2_act = use_sep_s2_act
+        self.quantization = quantization
 
         self.max_lmax = max(self.lmax_list)
+        if self.quantization:
+            import bitsandbytes as bnb
 
         self.so3_linear_1 = SO3_LinearV2(
             self.sphere_channels_all, self.hidden_channels, lmax=self.max_lmax
         )
         if self.use_grid_mlp:
             if self.use_sep_s2_act:
-                self.scalar_mlp = nn.Sequential(
-                    nn.Linear(
-                        self.sphere_channels_all,
-                        self.hidden_channels,
-                        bias=True,
-                    ),
-                    nn.SiLU(),
-                )
+                if self.quantization:
+                    self.scalar_mlp = nn.Sequential(
+                        bnb.nn.Linear8bitLt(
+                            self.sphere_channels_all,
+                            self.hidden_channels,
+                            bias=True,
+                        ),
+                        nn.SiLU(),
+                    )
+                else:
+                    self.scalar_mlp = nn.Sequential(
+                        nn.Linear(
+                            self.sphere_channels_all,
+                            self.hidden_channels,
+                            bias=True,
+                        ),
+                        nn.SiLU(),
+                    )
             else:
                 self.scalar_mlp = None
             self.grid_mlp = nn.Sequential(
@@ -503,25 +540,50 @@ class FeedForwardNetwork(torch.nn.Module):
                 ),
             )
         else:
-            if self.use_gate_act:
-                self.gating_linear = torch.nn.Linear(
-                    self.sphere_channels_all,
-                    self.max_lmax * self.hidden_channels,
-                )
-                self.gate_act = GateActivation(
-                    self.max_lmax, self.max_lmax, self.hidden_channels
-                )
-            else:
-                if self.use_sep_s2_act:
-                    self.gating_linear = torch.nn.Linear(
-                        self.sphere_channels_all, self.hidden_channels
+            if self.quantization:
+                if self.use_gate_act:
+                    self.gating_linear = bnb.nn.Linear8bitLt(
+                        self.sphere_channels_all,
+                        self.max_lmax * self.hidden_channels,
                     )
-                    self.s2_act = SeparableS2Activation(
-                        self.max_lmax, self.max_lmax
+                    self.gate_act = GateActivation(
+                        self.max_lmax, self.max_lmax, self.hidden_channels
                     )
                 else:
-                    self.gating_linear = None
-                    self.s2_act = S2Activation(self.max_lmax, self.max_lmax)
+                    if self.use_sep_s2_act:
+                        self.gating_linear = bnb.nn.Linear8bitLt(
+                            self.sphere_channels_all, self.hidden_channels
+                        )
+                        self.s2_act = SeparableS2Activation(
+                            self.max_lmax, self.max_lmax
+                        )
+                    else:
+                        self.gating_linear = None
+                        self.s2_act = S2Activation(
+                            self.max_lmax, self.max_lmax
+                        )
+            else:
+                if self.use_gate_act:
+                    self.gating_linear = torch.nn.Linear(
+                        self.sphere_channels_all,
+                        self.max_lmax * self.hidden_channels,
+                    )
+                    self.gate_act = GateActivation(
+                        self.max_lmax, self.max_lmax, self.hidden_channels
+                    )
+                else:
+                    if self.use_sep_s2_act:
+                        self.gating_linear = torch.nn.Linear(
+                            self.sphere_channels_all, self.hidden_channels
+                        )
+                        self.s2_act = SeparableS2Activation(
+                            self.max_lmax, self.max_lmax
+                        )
+                    else:
+                        self.gating_linear = None
+                        self.s2_act = S2Activation(
+                            self.max_lmax, self.max_lmax
+                        )
         self.so3_linear_2 = SO3_LinearV2(
             self.hidden_channels, self.output_channels, lmax=self.max_lmax
         )
@@ -656,6 +718,7 @@ class TransBlockV2(torch.nn.Module):
         drop_path_rate: float = 0.0,
         proj_drop: float = 0.0,
         atom_emb_drop: float = 0.0,
+        quantization: bool = False,
     ) -> None:
         super(TransBlockV2, self).__init__()
 
@@ -687,6 +750,7 @@ class TransBlockV2(torch.nn.Module):
             use_sep_s2_act=use_sep_s2_act,
             alpha_drop=alpha_drop,
             atom_emb_drop=atom_emb_drop,
+            quantization=quantization,
         )
 
         self.drop_path = (
@@ -715,6 +779,7 @@ class TransBlockV2(torch.nn.Module):
             use_gate_act=use_gate_act,
             use_grid_mlp=use_grid_mlp,
             use_sep_s2_act=use_sep_s2_act,
+            quantization=quantization,
         )
 
         if sphere_channels != output_channels:

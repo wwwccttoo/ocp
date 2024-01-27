@@ -40,6 +40,7 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         use_atom_edge_embedding: bool,
         rescale_factor,
         atom_emb_drop: float = 0.0,
+        quantization: bool = False,
     ):
         super(EdgeDegreeEmbedding, self).__init__()
         self.sphere_channels = sphere_channels
@@ -48,6 +49,7 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         self.num_resolutions = len(self.lmax_list)
         self.SO3_rotation = SO3_rotation
         self.mappingReduced = mappingReduced
+        self.quantization = quantization
 
         self.m_0_num_coefficients: int = self.mappingReduced.m_size[0]
         self.m_all_num_coefficents: int = len(self.mappingReduced.l_harmonic)
@@ -59,20 +61,35 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         self.use_atom_edge_embedding = use_atom_edge_embedding
 
         self.atom_emb_dropout = torch.nn.Dropout(atom_emb_drop)
-
+        if self.quantization:
+            import bitsandbytes as bnb
         if self.use_atom_edge_embedding:
-            self.source_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.source_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
-            self.target_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.target_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
+            if self.quantization:
+                self.source_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+            else:
+                self.source_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
             nn.init.uniform_(self.source_embedding.weight.data, -0.001, 0.001)
             nn.init.uniform_(self.target_embedding.weight.data, -0.001, 0.001)
             self.edge_channels_list[0] = (
@@ -85,7 +102,9 @@ class EdgeDegreeEmbedding(torch.nn.Module):
         self.edge_channels_list.append(
             self.m_0_num_coefficients * self.sphere_channels
         )
-        self.rad_func = RadialFunction(self.edge_channels_list)
+        self.rad_func = RadialFunction(
+            self.edge_channels_list, self.quantization
+        )
 
         self.rescale_factor = rescale_factor
 

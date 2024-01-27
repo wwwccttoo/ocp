@@ -29,6 +29,7 @@ class SO2_m_Convolution(torch.nn.Module):
         m_output_channels: int,
         lmax_list: List[int],
         mmax_list: List[int],
+        quantization: bool = False,
     ) -> None:
         super(SO2_m_Convolution, self).__init__()
 
@@ -38,6 +39,7 @@ class SO2_m_Convolution(torch.nn.Module):
         self.lmax_list = lmax_list
         self.mmax_list = mmax_list
         self.num_resolutions: int = len(self.lmax_list)
+        self.quantization = quantization
 
         num_channels = 0
         for i in range(self.num_resolutions):
@@ -49,13 +51,24 @@ class SO2_m_Convolution(torch.nn.Module):
             )
         assert num_channels > 0
 
-        self.fc = Linear(
-            num_channels,
-            2
-            * self.m_output_channels
-            * (num_channels // self.sphere_channels),
-            bias=False,
-        )
+        if self.quantization:
+            import bitsandbytes as bnb
+
+            self.fc = bnb.nn.Linear8bitLt(
+                num_channels,
+                2
+                * self.m_output_channels
+                * (num_channels // self.sphere_channels),
+                bias=False,
+            )
+        else:
+            self.fc = Linear(
+                num_channels,
+                2
+                * self.m_output_channels
+                * (num_channels // self.sphere_channels),
+                bias=False,
+            )
         self.fc.weight.data.mul_(1 / math.sqrt(2))
 
     def forward(self, x_m):
@@ -100,6 +113,7 @@ class SO2_Convolution(torch.nn.Module):
         internal_weights: bool = True,
         edge_channels_list: Optional[List[int]] = None,
         extra_m0_output_channels: Optional[int] = None,
+        quantization: bool = False,
     ):
         super(SO2_Convolution, self).__init__()
         self.sphere_channels = sphere_channels
@@ -111,6 +125,7 @@ class SO2_Convolution(torch.nn.Module):
         self.internal_weights = internal_weights
         self.edge_channels_list = copy.deepcopy(edge_channels_list)
         self.extra_m0_output_channels = extra_m0_output_channels
+        self.quantization = quantization
 
         num_channels_rad = 0  # for radial function
 
@@ -129,7 +144,14 @@ class SO2_Convolution(torch.nn.Module):
             m0_output_channels = (
                 m0_output_channels + self.extra_m0_output_channels
             )
-        self.fc_m0 = Linear(num_channels_m0, m0_output_channels)
+        if self.quantization:
+            import bitsandbytes as bnb
+
+            self.fc_m0 = bnb.nn.Linear8bitLt(
+                num_channels_m0, m0_output_channels
+            )
+        else:
+            self.fc_m0 = Linear(num_channels_m0, m0_output_channels)
         num_channels_rad = num_channels_rad + self.fc_m0.in_features
 
         # SO(2) convolution for non-zero m
@@ -142,6 +164,7 @@ class SO2_Convolution(torch.nn.Module):
                     self.m_output_channels,
                     self.lmax_list,
                     self.mmax_list,
+                    self.quantization,
                 )
             )
             num_channels_rad = (
@@ -153,7 +176,9 @@ class SO2_Convolution(torch.nn.Module):
         if not self.internal_weights:
             assert self.edge_channels_list is not None
             self.edge_channels_list.append(int(num_channels_rad))
-            self.rad_func = RadialFunction(self.edge_channels_list)
+            self.rad_func = RadialFunction(
+                self.edge_channels_list, self.quantization
+            )
 
     def forward(self, x, x_edge):
 
@@ -261,6 +286,7 @@ class SO2_Linear(torch.nn.Module):
         mappingReduced,
         internal_weights: bool = False,
         edge_channels_list: Optional[List[int]] = None,
+        quantization: bool = False,
     ):
         super(SO2_Linear, self).__init__()
         self.sphere_channels = sphere_channels
@@ -271,6 +297,7 @@ class SO2_Linear(torch.nn.Module):
         self.internal_weights = internal_weights
         self.edge_channels_list = copy.deepcopy(edge_channels_list)
         self.num_resolutions = len(lmax_list)
+        self.quantization = quantization
 
         num_channels_rad = 0
 
@@ -282,10 +309,20 @@ class SO2_Linear(torch.nn.Module):
             )
 
         # SO(2) linear for m = 0
-        self.fc_m0 = Linear(
-            num_channels_m0,
-            self.m_output_channels * (num_channels_m0 // self.sphere_channels),
-        )
+        if self.quantization:
+            import bitsandbytes as bnb
+
+            self.fc_m0 = bnb.nn.Linear8bitLt(
+                num_channels_m0,
+                self.m_output_channels
+                * (num_channels_m0 // self.sphere_channels),
+            )
+        else:
+            self.fc_m0 = Linear(
+                num_channels_m0,
+                self.m_output_channels
+                * (num_channels_m0 // self.sphere_channels),
+            )
         num_channels_rad = num_channels_rad + self.fc_m0.in_features
 
         # SO(2) linear for non-zero m
@@ -300,12 +337,20 @@ class SO2_Linear(torch.nn.Module):
                     num_in_channels + num_coefficents * self.sphere_channels
                 )
             assert num_in_channels > 0
-            fc = Linear(
-                num_in_channels,
-                self.m_output_channels
-                * (num_in_channels // self.sphere_channels),
-                bias=False,
-            )
+            if self.quantization:
+                fc = bnb.nn.Linear8bitLt(
+                    num_in_channels,
+                    self.m_output_channels
+                    * (num_in_channels // self.sphere_channels),
+                    bias=False,
+                )
+            else:
+                fc = Linear(
+                    num_in_channels,
+                    self.m_output_channels
+                    * (num_in_channels // self.sphere_channels),
+                    bias=False,
+                )
             num_channels_rad = num_channels_rad + fc.in_features
             self.so2_m_fc.append(fc)
 
@@ -314,7 +359,9 @@ class SO2_Linear(torch.nn.Module):
         if not self.internal_weights:
             assert self.edge_channels_list is not None
             self.edge_channels_list.append(int(num_channels_rad))
-            self.rad_func = RadialFunction(self.edge_channels_list)
+            self.rad_func = RadialFunction(
+                self.edge_channels_list, self.quantization
+            )
 
     def forward(self, x, x_edge):
 

@@ -7,17 +7,25 @@ class RadialFunction(nn.Module):
     Contruct a radial function (linear layers + layer normalization + SiLU) given a list of channels
     """
 
-    def __init__(self, channels_list) -> None:
+    def __init__(self, channels_list, quantization) -> None:
         super().__init__()
         modules = []
         input_channels = channels_list[0]
+        if quantization:
+            import bitsandbytes as bnb
         for i in range(len(channels_list)):
             if i == 0:
                 continue
-
-            modules.append(
-                nn.Linear(input_channels, channels_list[i], bias=True)
-            )
+            if quantization:
+                modules.append(
+                    bnb.nn.Linear8bitLt(
+                        input_channels, channels_list[i], bias=True
+                    )
+                )
+            else:
+                modules.append(
+                    nn.Linear(input_channels, channels_list[i], bias=True)
+                )
             input_channels = channels_list[i]
 
             if i == len(channels_list) - 1:

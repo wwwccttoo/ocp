@@ -116,22 +116,42 @@ class EquiformerV2ForcesTrainer(ForcesTrainer):
             )
 
     def load_optimizer(self):
-        optimizer = self.config["optim"].get("optimizer", "AdamW")
-        optimizer = getattr(optim, optimizer)
-        optimizer_params = self.config["optim"]["optimizer_params"]
-        weight_decay = optimizer_params["weight_decay"]
+        if self.config["optim"].get("quantization", False):
+            import bitsandbytes as bnb
 
-        parameters, name_no_wd = add_weight_decay(
-            self.model, weight_decay, self.model_params_no_wd
-        )
-        logging.info("Parameters without weight decay:")
-        logging.info(name_no_wd)
+            optimizer = self.config["optim"].get("optimizer", "AdamW")
+            optimizer = getattr(bnb.optim, optimizer)
+            optimizer_params = self.config["optim"]["optimizer_params"]
+            weight_decay = optimizer_params["weight_decay"]
 
-        self.optimizer = optimizer(
-            parameters,
-            lr=self.config["optim"]["lr_initial"],
-            **optimizer_params,
-        )
+            parameters, name_no_wd = add_weight_decay(
+                self.model, weight_decay, self.model_params_no_wd
+            )
+            logging.info("Parameters without weight decay:")
+            logging.info(name_no_wd)
+
+            self.optimizer = optimizer(
+                parameters,
+                lr=self.config["optim"]["lr_initial"],
+                **optimizer_params,
+            )
+        else:
+            optimizer = self.config["optim"].get("optimizer", "AdamW")
+            optimizer = getattr(optim, optimizer)
+            optimizer_params = self.config["optim"]["optimizer_params"]
+            weight_decay = optimizer_params["weight_decay"]
+
+            parameters, name_no_wd = add_weight_decay(
+                self.model, weight_decay, self.model_params_no_wd
+            )
+            logging.info("Parameters without weight decay:")
+            logging.info(name_no_wd)
+
+            self.optimizer = optimizer(
+                parameters,
+                lr=self.config["optim"]["lr_initial"],
+                **optimizer_params,
+            )
 
     def load_extras(self):
         def multiply(obj, num):

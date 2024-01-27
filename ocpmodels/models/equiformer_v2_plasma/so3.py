@@ -644,22 +644,44 @@ class SO3_Grid(torch.nn.Module):
 
 class SO3_Linear(torch.nn.Module):
     def __init__(
-        self, in_features: int, out_features: int, lmax: int, bias: bool = True
+        self,
+        in_features: int,
+        out_features: int,
+        lmax: int,
+        bias: bool = True,
+        quantization: bool = False,
     ) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.lmax = lmax
+        self.quantization = quantization
+        if self.quantization:
+            import bitsandbytes as bnb
         self.linear_list = torch.nn.ModuleList()
         for lval in range(lmax + 1):
-            if lval == 0:
-                self.linear_list.append(
-                    Linear(in_features, out_features, bias=bias)
-                )
+            if self.quantization:
+                if lval == 0:
+                    self.linear_list.append(
+                        bnb.nn.Linear8bitLt(
+                            in_features, out_features, bias=bias
+                        )
+                    )
+                else:
+                    self.linear_list.append(
+                        bnb.nn.Linear8bitLt(
+                            in_features, out_features, bias=False
+                        )
+                    )
             else:
-                self.linear_list.append(
-                    Linear(in_features, out_features, bias=False)
-                )
+                if lval == 0:
+                    self.linear_list.append(
+                        Linear(in_features, out_features, bias=bias)
+                    )
+                else:
+                    self.linear_list.append(
+                        Linear(in_features, out_features, bias=False)
+                    )
 
     def forward(self, input_embedding, output_scale=None):
         out = []

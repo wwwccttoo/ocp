@@ -161,6 +161,7 @@ class EquiformerV2_plasma(BaseModel):
         avg_degree: Optional[float] = None,
         use_energy_lin_ref: Optional[bool] = False,
         load_energy_lin_ref: Optional[bool] = False,
+        quantization: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -245,13 +246,24 @@ class EquiformerV2_plasma(BaseModel):
             self.num_resolutions * self.sphere_channels
         )
 
+        self.quantization = quantization
+        if self.quantization:
+            import bitsandbytes as bnb
         # Weights for message initialization
-        self.sphere_proton_embedding = nn.Embedding(
-            1, self.sphere_channels_all
-        )
-        self.sphere_embedding = nn.Embedding(
-            self.max_num_elements, self.sphere_channels_all
-        )
+        if self.quantization:
+            self.sphere_proton_embedding = bnb.nn.StableEmbedding(
+                1, self.sphere_channels_all
+            )
+            self.sphere_embedding = bnb.nn.StableEmbedding(
+                self.max_num_elements, self.sphere_channels_all
+            )
+        else:
+            self.sphere_proton_embedding = nn.Embedding(
+                1, self.sphere_channels_all
+            )
+            self.sphere_embedding = nn.Embedding(
+                self.max_num_elements, self.sphere_channels_all
+            )
 
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -275,21 +287,40 @@ class EquiformerV2_plasma(BaseModel):
 
         # Initialize atom edge embedding
         if self.share_atom_edge_embedding and self.use_atom_edge_embedding:
-            self.source_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.source_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
-            self.target_proton_embedding = nn.Embedding(
-                1, self.edge_channels_list[-1]
-            )
-            self.target_embedding = nn.Embedding(
-                self.max_num_elements, self.edge_channels_list[-1]
-            )
-            self.edge_channels_list[0] = (
-                self.edge_channels_list[0] + 2 * self.edge_channels_list[-1]
-            )
+            if self.quantization:
+                self.source_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = bnb.nn.StableEmbedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = bnb.nn.StableEmbedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.edge_channels_list[0] = (
+                    self.edge_channels_list[0]
+                    + 2 * self.edge_channels_list[-1]
+                )
+            else:
+                self.source_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.source_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.target_proton_embedding = nn.Embedding(
+                    1, self.edge_channels_list[-1]
+                )
+                self.target_embedding = nn.Embedding(
+                    self.max_num_elements, self.edge_channels_list[-1]
+                )
+                self.edge_channels_list[0] = (
+                    self.edge_channels_list[0]
+                    + 2 * self.edge_channels_list[-1]
+                )
         else:
             self.source_embedding, self.target_embedding = None, None
 
@@ -332,6 +363,7 @@ class EquiformerV2_plasma(BaseModel):
             self.block_use_atom_edge_embedding,
             rescale_factor=self.avg_degree,
             atom_emb_drop=self.atom_emb_drop,
+            quantization=self.quantization,
         )
 
         # Initialize the blocks for each layer of EquiformerV2
@@ -366,6 +398,7 @@ class EquiformerV2_plasma(BaseModel):
                 self.drop_path_rate,
                 self.proj_drop,
                 self.atom_emb_drop,
+                self.quantization,
             )
             self.blocks.append(block)
 
@@ -386,6 +419,7 @@ class EquiformerV2_plasma(BaseModel):
             self.use_gate_act,
             self.use_grid_mlp,
             self.use_sep_s2_act,
+            self.quantization,
         )
         if self.regress_forces:
             self.force_block = SO2EquivariantGraphAttention(
@@ -411,6 +445,7 @@ class EquiformerV2_plasma(BaseModel):
                 self.use_sep_s2_act,
                 alpha_drop=0.0,
                 atom_emb_drop=self.atom_emb_drop,
+                quantization=self.quantization,
             )
 
         if self.load_energy_lin_ref:
@@ -765,7 +800,11 @@ class EquiformerV2_plasma(BaseModel):
             parent_key = key.replace("proton_", "")
             with torch.no_grad():
                 # proton embedding start with the hydrogen embedding
-                val[0, :] = para_dict[parent_key][1, :].detach().clone()
+                if ".norm." not in parent_key:
+                    val[0, :] = para_dict[parent_key][1, :].detach().clone()
+                else:
+                    # special consideration for quantization
+                    val = para_dict[parent_key].detach().clone()
 
     def generate_graph(
         self,
