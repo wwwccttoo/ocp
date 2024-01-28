@@ -990,18 +990,18 @@ class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
                             "Please check if all shared parameters are used "
                             "and point to PyTorch parameters."
                         )
-        if self.clip_grad_norm:
-            if self.scaler:
-                self.scaler.unscale_(self.optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                max_norm=self.clip_grad_norm,
-            )
-            if self.logger is not None:
-                self.logger.log(
-                    {"grad_norm": grad_norm}, step=self.step, split="train"
-                )
         if if_update:
+            if self.clip_grad_norm:
+                if self.scaler:
+                    self.scaler.unscale_(self.optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    max_norm=self.clip_grad_norm,
+                )
+                if self.logger is not None:
+                    self.logger.log(
+                        {"grad_norm": grad_norm}, step=self.step, split="train"
+                    )
             if self.scaler:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
