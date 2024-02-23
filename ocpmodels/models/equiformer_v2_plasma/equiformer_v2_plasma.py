@@ -155,6 +155,7 @@ class EquiformerV2_plasma(BaseModel):
         drop_path_rate: float = 0.05,
         proj_drop: float = 0.0,
         atom_emb_drop: float = 0.0,
+        energy_input_emb_drop: float = 0.0,
         weight_init: str = "normal",
         enforce_max_neighbors_strictly: bool = True,
         avg_num_nodes: Optional[float] = None,
@@ -221,6 +222,7 @@ class EquiformerV2_plasma(BaseModel):
         self.drop_path_rate = drop_path_rate
         self.proj_drop = proj_drop
         self.atom_emb_drop = atom_emb_drop
+        self.energy_input_emb_drop = energy_input_emb_drop
 
         self.atom_emb_dropout = torch.nn.Dropout(self.atom_emb_drop)
 
@@ -420,6 +422,7 @@ class EquiformerV2_plasma(BaseModel):
             self.use_grid_mlp,
             self.use_sep_s2_act,
             self.quantization,
+            self.energy_input_emb_drop,
         )
         if self.regress_forces:
             self.force_block = SO2EquivariantGraphAttention(
@@ -484,6 +487,18 @@ class EquiformerV2_plasma(BaseModel):
         if kwargs.get("start_proton_from_H", False):
             print("Initialize the proton embedding from H!")
             self.assign_proton_embedding()
+        if kwargs.get("freeze_proton_embedding", False):
+            print(
+                "The proton embeddings are fixed!\n Please check if this is a desired behavior if this is the first finetuning!!!"
+            )
+            self.freeze_proton_embedding()
+        if kwargs.get("freeze_prev_blocks", False):
+            fix_idx = kwargs.get("freeze_prev_block_until", self.num_layers)
+            fix_idx = min(fix_idx, self.num_layers)
+            print(
+                f"The equiformer blocks up to (including) the {fix_idx}'s block are freezed!"
+            )
+            self.fix_first_several_blocks(fix_idx)
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -782,6 +797,36 @@ class EquiformerV2_plasma(BaseModel):
                     or "target_embed" in name
                     or "sphere_embed" in name
                 ):
+                    p.requires_grad = False
+
+    def freeze_proton_embedding(self):
+        for name, p in self.named_parameters():
+            if p.requires_grad and "proton" in name:
+                p.requires_grad = False
+
+    def fix_first_several_blocks(self, fix_until: int):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if (
+                "proton" not in name
+                and "force_block" not in name
+                and "energy_block" not in name
+            ):
+                flag = False
+                # the block index starting from 0
+                for block_idx in range(fix_until):
+                    if f"block.{block_idx}" in name:
+                        flag = True
+                        break
+                # this is the normalization layer between the previous blocks
+                # and the energy and force blocks
+                # should be tuned
+                if "norm." not in name or "_norm." in name:
+                    flag = True
+                # anything up to the specified block is fixed (including the specified block)
+                if flag:
                     p.requires_grad = False
 
     def assign_proton_embedding(self):
