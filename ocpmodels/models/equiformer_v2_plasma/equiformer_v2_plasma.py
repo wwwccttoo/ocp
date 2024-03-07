@@ -410,6 +410,11 @@ class EquiformerV2_plasma(BaseModel):
             lmax=max(self.lmax_list),
             num_channels=self.sphere_channels,
         )
+
+        self.energy_input_emb_dropout = torch.nn.Dropout(
+            self.energy_input_emb_drop
+        )
+
         self.energy_block = FeedForwardNetwork(
             self.sphere_channels,
             self.ffn_hidden_channels,
@@ -422,7 +427,6 @@ class EquiformerV2_plasma(BaseModel):
             self.use_grid_mlp,
             self.use_sep_s2_act,
             self.quantization,
-            self.energy_input_emb_drop,
         )
         if self.regress_forces:
             self.force_block = SO2EquivariantGraphAttention(
@@ -499,6 +503,27 @@ class EquiformerV2_plasma(BaseModel):
                 f"The equiformer blocks up to (including) the {fix_idx}'s block are freezed!"
             )
             self.fix_first_several_blocks(fix_idx)
+
+        if kwargs.get("freeze_middle_layer_norm", False):
+            print("the final layer norm is fixed!")
+            self.fix_norm_layer()
+
+        if kwargs.get("freeze_energy_block", False):
+            print("The energy block is fixed!")
+            self.fix_energy_block()
+
+        if kwargs.get("freeze_force_block", False):
+            print("The force block is fixed!")
+            self.fix_force_block()
+
+        if kwargs.get("relax_ffn_after", 0):
+            relax_after = kwargs.get("relax_ffn_after", 0)
+            print(
+                f"Relaxing the ffn layers for blocks after {relax_after}th block!"
+            )
+            self.leave_ffn_unfreeze_only_until(
+                kwargs.get("relax_ffn_after", 0)
+            )
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -678,6 +703,8 @@ class EquiformerV2_plasma(BaseModel):
         ###############################################################
         # Energy estimation
         ###############################################################
+        x.embedding = self.energy_input_emb_dropout(x.embedding)
+
         node_energy = self.energy_block(x)
         node_energy = node_energy.embedding.narrow(1, 0, 1)
         energy = torch.zeros(
@@ -817,17 +844,59 @@ class EquiformerV2_plasma(BaseModel):
                 flag = False
                 # the block index starting from 0
                 for block_idx in range(fix_until):
-                    if f"block.{block_idx}" in name:
+                    if f"blocks.{block_idx}" in name:
                         flag = True
                         break
                 # this is the normalization layer between the previous blocks
                 # and the energy and force blocks
                 # should be tuned
-                if "norm." not in name or "_norm." in name:
+                if (
+                    "norm." not in name or "_norm." in name
+                ) and "blocks." not in name:
                     flag = True
                 # anything up to the specified block is fixed (including the specified block)
                 if flag:
                     p.requires_grad = False
+
+    def leave_ffn_unfreeze_only_until(self, fix_until: int):
+        # first fix all the equiformer blocks, then relax their ffn layers
+        self.fix_first_several_blocks(self.num_layers)
+        # then fix the subsequent norm layer
+        self.fix_norm_layer()
+        # then fix the energy and force blocks
+        self.fix_energy_block()
+        self.fix_force_block()
+        # then relax the ffn layers
+        for name, p in self.named_parameters():
+            for block_idx in range(fix_until, self.num_layers):
+                if (
+                    f"blocks.{block_idx}" in name
+                    and "ffn" in name
+                    and "proton" not in name
+                ):
+                    p.requires_grad = True
+                    break
+
+    def fix_norm_layer(self):
+        for name, p in self.named_parameters():
+            if "norm." in name and "_norm." not in name:
+                p.requires_grad = False
+
+    def fix_energy_block(self):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if "proton" not in name and "energy_block" in name:
+                p.requires_grad = False
+
+    def fix_force_block(self):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if "proton" not in name and "force_block" in name:
+                p.requires_grad = False
 
     def assign_proton_embedding(self):
         para_dict = {}

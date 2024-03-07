@@ -154,6 +154,7 @@ class EquiformerV2_plasma(BaseModel):
         drop_path_rate: float = 0.05,
         proj_drop: float = 0.0,
         atom_emb_drop: float = 0.0,
+        energy_input_emb_drop: float = 0.0,
         weight_init: str = "normal",
         enforce_max_neighbors_strictly: bool = True,
         avg_num_nodes: Optional[float] = None,
@@ -219,6 +220,7 @@ class EquiformerV2_plasma(BaseModel):
         self.drop_path_rate = drop_path_rate
         self.proj_drop = proj_drop
         self.atom_emb_drop = atom_emb_drop
+        self.energy_input_emb_drop = energy_input_emb_drop
 
         self.atom_emb_dropout = torch.nn.Dropout(self.atom_emb_drop)
 
@@ -374,6 +376,11 @@ class EquiformerV2_plasma(BaseModel):
             lmax=max(self.lmax_list),
             num_channels=self.sphere_channels,
         )
+
+        self.energy_input_emb_dropout = torch.nn.Dropout(
+            self.energy_input_emb_drop
+        )
+
         self.energy_block = FeedForwardNetwork(
             self.sphere_channels,
             self.ffn_hidden_channels,
@@ -599,6 +606,8 @@ class EquiformerV2_plasma(BaseModel):
         ###############################################################
         # Energy estimation
         ###############################################################
+        x.embedding = self.energy_input_emb_dropout(x.embedding)
+
         node_energy = self.energy_block(x)
         node_energy = node_energy.embedding.narrow(1, 0, 1)
         energy = torch.zeros(

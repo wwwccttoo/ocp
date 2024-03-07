@@ -482,7 +482,6 @@ class FeedForwardNetwork(torch.nn.Module):
         use_grid_mlp: bool = False,
         use_sep_s2_act: bool = True,
         quantization: bool = False,
-        energy_input_emb_drop: float = 0.0,
     ):
         super(FeedForwardNetwork, self).__init__()
         self.sphere_channels = sphere_channels
@@ -497,11 +496,6 @@ class FeedForwardNetwork(torch.nn.Module):
         self.use_grid_mlp = use_grid_mlp
         self.use_sep_s2_act = use_sep_s2_act
         self.quantization = quantization
-        self.energy_input_emb_drop = energy_input_emb_drop
-
-        self.energy_input_emb_dropout = torch.nn.Dropout(
-            self.energy_input_emb_drop
-        )
 
         self.max_lmax = max(self.lmax_list)
         if self.quantization:
@@ -595,11 +589,6 @@ class FeedForwardNetwork(torch.nn.Module):
         )
 
     def forward(self, input_embedding):
-        input_embedding = input_embedding.clone()
-        input_embedding.embedding = self.energy_input_emb_dropout(
-            input_embedding.embedding
-        )
-
         gating_scalars = None
         if self.use_grid_mlp:
             if self.use_sep_s2_act:

@@ -491,8 +491,8 @@ class EquiformerV2ForcesTrainer(ForcesTrainer):
                         loss.append(
                             force_mult
                             * self.loss_fn["force"](
-                                (out["forces"] * signify_factor_mask)[mask],
-                                (force_target * signify_factor_mask)[mask],
+                                (out["forces"])[mask],
+                                (force_target)[mask],
                             )
                         )
                 else:
