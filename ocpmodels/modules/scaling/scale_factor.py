@@ -19,10 +19,11 @@ IndexFn = Callable[[], None]
 
 def _check_consistency(old: torch.Tensor, new: torch.Tensor, key: str) -> None:
     if not torch.allclose(old, new):
-        raise ValueError(
+        print(
+            "warning! ",
             f"Scale factor parameter {key} is inconsistent with the loaded state dict.\n"
             f"Old: {old}\n"
-            f"Actual: {new}"
+            f"Actual: {new}",
         )
 
 

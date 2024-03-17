@@ -428,6 +428,22 @@ class EquiformerV2_plasma(BaseModel):
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
 
+        if kwargs.get("freeze_prev_blocks", False):
+            fix_idx = kwargs.get("freeze_prev_block_until", self.num_layers)
+            fix_idx = min(fix_idx, self.num_layers)
+            print(
+                f"The equiformer blocks up to (including) the {fix_idx}'s block are freezed!"
+            )
+            self.fix_first_several_blocks(fix_idx)
+
+        if kwargs.get("freeze_energy_block", False):
+            print("The energy block is fixed!")
+            self.fix_energy_block()
+
+        if kwargs.get("freeze_force_block", False):
+            print("The force block is fixed!")
+            self.fix_force_block()
+
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         # extract back the graph with proton!
@@ -718,6 +734,49 @@ class EquiformerV2_plasma(BaseModel):
                     assert global_parameter_name in named_parameters_list
                     no_wd_list.append(global_parameter_name)
         return set(no_wd_list)
+
+    def fix_first_several_blocks(self, fix_until: int):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if (
+                "proton" not in name
+                and "force_block" not in name
+                and "energy_block" not in name
+            ):
+                flag = False
+                # the block index starting from 0
+                for block_idx in range(fix_until):
+                    if f"blocks.{block_idx}" in name:
+                        flag = True
+                        break
+                # this is the normalization layer between the previous blocks
+                # and the energy and force blocks
+                # should be tuned
+                if (
+                    "norm." not in name or "_norm." in name
+                ) and "blocks." not in name:
+                    flag = True
+                # anything up to the specified block is fixed (including the specified block)
+                if flag:
+                    p.requires_grad = False
+
+    def fix_energy_block(self):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if "proton" not in name and "energy_block" in name:
+                p.requires_grad = False
+
+    def fix_force_block(self):
+        # this method fix the first several blocks to maintain the knowledge
+        # the feedforward layers for energy and the equiformer block for force are not fixed
+        # the proton embedding also should not be fixed
+        for name, p in self.named_parameters():
+            if "proton" not in name and "force_block" in name:
+                p.requires_grad = False
 
     def generate_graph(
         self,
