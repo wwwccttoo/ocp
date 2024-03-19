@@ -173,7 +173,7 @@ class GemnetEquiformer_V2(BaseModel):
         if kwargs.get("pretrained", None):
             try:
                 self.load_state_dict(
-                    torch.load(kwargs["pretrained"]), strict=True
+                    torch.load(kwargs["pretrained"]), strict=False
                 )
                 print("Successfully load the pretrained model!!!")
             except Exception:
