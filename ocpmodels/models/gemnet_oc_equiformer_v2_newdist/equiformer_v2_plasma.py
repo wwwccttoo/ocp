@@ -56,7 +56,7 @@ _AVG_DEGREE = (
 )
 
 
-@registry.register_model("equiformer_v2_plasma_newdist")
+@registry.register_model("equiformer_v2_plasma_newdist_for_oc")
 class EquiformerV2_plasma(BaseModel):
     """
     Equiformer with graph attention built upon SO(2) convolution and feedforward network built upon S2 activation

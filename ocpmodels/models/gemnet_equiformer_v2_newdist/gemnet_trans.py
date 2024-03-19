@@ -9,6 +9,7 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 import math
+from collections import OrderedDict
 from typing import Optional
 
 import numpy as np
@@ -285,6 +286,16 @@ class GemNetTrans(BaseModel):
                     # if "MHA" not in name and "block" not in name:
                     param.requires_grad = False
 
+        if kwargs.get("gemnet_freeze_until", None):
+            freeze_until = kwargs["gemnet_freeze_until"]
+            for i in range(freeze_until, self.num_blocks + 1):
+                for name, param in self.out_blocks[i].named_parameters():
+                    param.requires_grad = True
+            # the number of interaction blocks is num_blocks - 1
+            for i in range(max(0, freeze_until - 1), self.num_blocks):
+                for name, param in self.int_blocks[i].named_parameters():
+                    param.requires_grad = True
+
         if self.attn_type == "base":
             emb_size_taag = 1
         else:
@@ -370,6 +381,30 @@ class GemNetTrans(BaseModel):
             self.out_energy = Dense(emb_size_atom, num_targets)
             self.out_forces = Dense(emb_size_edge, num_targets)
         # this is different from the one used on TAAG, it is a universal scaling file loading function
+
+        if kwargs.get("pretrained_gemnet", None):
+            try:
+                self.load_state_dict(
+                    torch.load(kwargs["pretrained_gemnet"]), strict=False
+                )
+                print("Gemnet: Successfully load the pretrained model!!!")
+            except Exception:
+                try:
+                    equiformer_checkpoint = torch.load(
+                        kwargs["pretrained_gemnet"], map_location="cpu"
+                    )
+                    new_qeuiformer_state = OrderedDict()
+                    for key in equiformer_checkpoint["state_dict"].keys():
+                        new_qeuiformer_state[
+                            key.replace("module.", "")
+                        ] = equiformer_checkpoint["state_dict"][key]
+                    self.load_state_dict(new_qeuiformer_state, strict=False)
+                    print("Gemnet: Successfully load the pretrained model!!!")
+                except Exception:
+                    print(
+                        "Gemnet: The pretrained model or its path has problems, please check."
+                    )
+        # overwrite the scale file
         load_scales_compat(self, scale_file)
 
     def get_triplets(self, edge_index, num_atoms):
@@ -670,14 +705,16 @@ class GemNetTrans(BaseModel):
         E_all = torch.stack(E_all, dim=0)
         F_all = torch.stack(F_all, dim=0)
 
-        if self.add_positional_embedding:
+        if self.add_positional_embedding and self.attn_type != "base":
             E_all = self.MHA_positional_embedding(E_all)
             F_all = self.force_MHA_positional_embedding(F_all)
 
         # no force in the original TAAG paper
         # TODO: need to add it in future!!!
         if self.attn_type == "base":
-
+            # TAAG for in-domain transfer learning might not suitable for us
+            # since we have surface charges?
+            """
             alpha = torch.bmm(E_all, torch.transpose(E_all, 1, 2))
             alpha = alpha / math.sqrt(E_all.shape[-1])
             alpha = self.softmax(alpha)
@@ -691,6 +728,10 @@ class GemNetTrans(BaseModel):
 
             F_t = torch.bmm(alpha, F_all)
             F_t = torch.sum(F_t, dim=0)
+            """
+            # therefore, we just sum them up, as did in the gemnet model
+            E_t = torch.sum(E_all, dim=0)
+            F_t = torch.sum(F_all, dim=0)
 
         elif self.attn_type == "multi":
 

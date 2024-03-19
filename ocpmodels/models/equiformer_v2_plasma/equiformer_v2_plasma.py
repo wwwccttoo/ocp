@@ -483,7 +483,7 @@ class EquiformerV2_plasma(BaseModel):
                     print("Successfully load the pretrained model!!!")
                 except Exception:
                     print(
-                        "The pretrained model ot its path has problems, please check."
+                        "The pretrained model or its path has problems, please check."
                     )
         if kwargs.get("freeze_equiformer_embedding", False):
             print("The atom embedding of the equiformer is fixed!")

@@ -15,7 +15,7 @@ from ocpmodels.models.base import BaseModel
 
 from .equiformer_v2_plasma import EquiformerV2_plasma
 from .gaussian_rbf import GaussianRadialBasisLayer
-from .gemnet_trans import GemNetTrans
+from .gemnet_oc_trans import GemNetOC
 from .layer_norm import (
     EquivariantLayerNormArray,
     EquivariantLayerNormArraySphericalHarmonics,
@@ -25,8 +25,8 @@ from .layer_norm import (
 from .so3 import SO3_LinearV2
 
 
-@registry.register_model("gemnet_equiformer_v2_newdist")
-class GemnetEquiformer_V2(BaseModel):
+@registry.register_model("gemnet_oc_equiformer_v2_newdist")
+class GemnetOCEquiformer_V2(BaseModel):
     """
     Shared arguments
     ---------
@@ -36,6 +36,7 @@ class GemnetEquiformer_V2(BaseModel):
     otf_graph (bool):       Compute graph On The Fly (OTF)
 
     ---------
+    Different from GemNet-TAAG, this uses the GemNet-OC model
     GemNet-TAAG part, triplets-only variant of GemNet, compensating for system/method mismatches
 
     Parameters
@@ -56,14 +57,28 @@ class GemnetEquiformer_V2(BaseModel):
             Embedding size of the atoms.
         emb_size_edge: int
             Embedding size of the edges.
-        emb_size_trip: int
-            (Down-projected) Embedding size in the triplet message passing block.
+        emb_size_trip_in: int
+            (Down-projected) embedding size of the quadruplet edge embeddings
+            before the bilinear layer.
+        emb_size_trip_out: int
+            (Down-projected) embedding size of the quadruplet edge embeddings
+            after the bilinear layer.
+        emb_size_quad_in: int
+            (Down-projected) embedding size of the quadruplet edge embeddings
+            before the bilinear layer.
+        emb_size_quad_out: int
+            (Down-projected) embedding size of the quadruplet edge embeddings
+            after the bilinear layer.
+        emb_size_aint_in: int
+            Embedding size in the atom interaction before the bilinear layer.
+        emb_size_aint_out: int
+            Embedding size in the atom interaction after the bilinear layer.
         emb_size_rbf: int
             Embedding size of the radial basis transformation.
         emb_size_cbf: int
             Embedding size of the circular basis transformation (one angle).
-        emb_size_bil_trip: int
-            Embedding size of the edge embeddings in the triplet-based message passing block after the bilinear layer.
+        emb_size_sbf: int
+            Embedding size of the spherical basis transformation (two angles).
 
         num_before_skip: int
             Number of residual blocks before the first skip connection.
@@ -73,29 +88,88 @@ class GemnetEquiformer_V2(BaseModel):
             Number of residual blocks after the concatenation.
         num_atom: int
             Number of residual blocks in the atom embedding blocks.
+        num_output_afteratom: int
+            Number of residual blocks in the output blocks
+            after adding the atom embedding.
+        num_atom_emb_layers: int
+            Number of residual blocks for transforming atom embeddings.
+        num_global_out_layers: int
+            Number of final residual blocks before the output.
 
         regress_forces: bool
             Whether to predict forces. Default: True
         direct_forces: bool
             If True predict forces based on aggregation of interatomic directions.
             If False predict forces based on negative gradient of energy potential.
+        use_pbc: bool
+            Whether to use periodic boundary conditions.
+        scale_backprop_forces: bool
+            Whether to scale up the energy and then scales down the forces
+            to prevent NaNs and infs in backpropagated forces.
 
         cutoff: float
-            Embedding cutoff for interactomic directions in Angstrom.
+            Embedding cutoff for interatomic connections and embeddings in Angstrom.
+        cutoff_qint: float
+            Quadruplet interaction cutoff in Angstrom.
+            Optional. Uses cutoff per default.
+        cutoff_aeaint: float
+            Edge-to-atom and atom-to-edge interaction cutoff in Angstrom.
+            Optional. Uses cutoff per default.
+        cutoff_aint: float
+            Atom-to-atom interaction cutoff in Angstrom.
+            Optional. Uses maximum of all other cutoffs per default.
+        max_neighbors: int
+            Maximum number of neighbors for interatomic connections and embeddings.
+        max_neighbors_qint: int
+            Maximum number of quadruplet interactions per embedding.
+            Optional. Uses max_neighbors per default.
+        max_neighbors_aeaint: int
+            Maximum number of edge-to-atom and atom-to-edge interactions per embedding.
+            Optional. Uses max_neighbors per default.
+        max_neighbors_aint: int
+            Maximum number of atom-to-atom interactions per atom.
+            Optional. Uses maximum of all other neighbors per default.
+        enforce_max_neighbors_strictly: bool
+            When subselected edges based on max_neighbors args, arbitrarily
+            select amongst degenerate edges to have exactly the correct number.
         rbf: dict
             Name and hyperparameters of the radial basis function.
+        rbf_spherical: dict
+            Name and hyperparameters of the radial basis function used as part of the
+            circular and spherical bases.
+            Optional. Uses rbf per default.
         envelope: dict
             Name and hyperparameters of the envelope function.
         cbf: dict
-            Name and hyperparameters of the cosine basis function.
+            Name and hyperparameters of the circular basis function.
+        sbf: dict
+            Name and hyperparameters of the spherical basis function.
         extensive: bool
             Whether the output should be extensive (proportional to the number of atoms)
+        forces_coupled: bool
+            If True, enforce that |F_st| = |F_ts|. No effect if direct_forces is False.
         output_init: str
             Initialization method for the final dense layer.
         activation: str
             Name of the activation function.
         scale_file: str
-            Path to the json file containing the scaling factors.
+            Path to the pytorch file containing the scaling factors.
+
+        quad_interaction: bool
+            Whether to use quadruplet interactions (with dihedral angles)
+        atom_edge_interaction: bool
+            Whether to use atom-to-edge interactions
+        edge_atom_interaction: bool
+            Whether to use edge-to-atom interactions
+        atom_interaction: bool
+            Whether to use atom-to-atom interactions
+
+        scale_basis: bool
+            Whether to use a scaling layer in the raw basis function for better
+            numerical stability.
+        qint_tags: list
+            Which atom tags to use quadruplet interactions for.
+            0=sub-surface bulk, 1=surface, 2=adsorbate atoms.
         freeze: bool
             Whether we should be doing the transfer learning experiments.
         after_freeze_numblocks: int
@@ -166,7 +240,7 @@ class GemnetEquiformer_V2(BaseModel):
         super().__init__()
         self.regress_forces = kwargs.get("regress_forces", False)
         self.direct_forces = kwargs.get("direct_forces", False)
-        self.gemnet_part = GemNetTrans(**kwargs)
+        self.gemnet_part = GemNetOC(**kwargs)
         kwargs["max_neighbors"] = kwargs["max_neighbors_gh"]
         kwargs["num_heads"] = kwargs["num_heads_gh"]
         self.equiformer_part = EquiformerV2_plasma(**kwargs)
