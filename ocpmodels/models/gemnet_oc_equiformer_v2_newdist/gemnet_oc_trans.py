@@ -537,28 +537,20 @@ class GemNetOC(BaseModel):
                     for _ in range(self.after_freeze_numblocks)
                 ]
 
-        if kwargs.get("pretrained_gemnet_oc", None):
-            try:
-                self.load_state_dict(
-                    torch.load(kwargs["pretrained_gemnet_oc"]), strict=False
-                )
-                print("Gemnet_OC: Successfully load the pretrained model!!!")
-            except Exception:
-                try:
-                    equiformer_checkpoint = torch.load(
-                        kwargs["pretrained_gemnet_oc"], map_location="cpu"
-                    )
-                    new_qeuiformer_state = OrderedDict()
-                    for key in equiformer_checkpoint["state_dict"].keys():
-                        new_qeuiformer_state[
-                            key.replace("module.", "")
-                        ] = equiformer_checkpoint["state_dict"][key]
-                    self.load_state_dict(new_qeuiformer_state, strict=False)
-                    print("Gemnet: Successfully load the pretrained model!!!")
-                except Exception:
-                    print(
-                        "Gemnet: The pretrained model or its path has problems, please check."
-                    )
+        if kwargs.get("pretrained_gemnet", None):
+            gemnet_checkpoint = torch.load(
+                kwargs["pretrained_gemnet"], map_location="cpu"
+            )
+            if "state_dict" in gemnet_checkpoint:
+                gemnet_checkpoint = gemnet_checkpoint["state_dict"]
+            new_gemnet_state = OrderedDict()
+            for key in gemnet_checkpoint.keys():
+                new_gemnet_state[
+                    key.replace("module.", "")
+                ] = gemnet_checkpoint[key]
+            self.load_state_dict(new_gemnet_state, strict=False)
+            print("Gemnet_OC: Successfully load the pretrained model!!!")
+        # overwrite the scale file
 
         load_scales_compat(self, scale_file)
 

@@ -430,29 +430,18 @@ class EquiformerV2_plasma(BaseModel):
         self.apply(self._uniform_init_rad_func_linear_weights)
 
         if kwargs.get("pretrained_equiformer", None):
-            try:
-                self.load_state_dict(
-                    torch.load(kwargs["pretrained_equiformer"]), strict=False
-                )
-                print("Equiformer: Successfully load the pretrained model!!!")
-            except Exception:
-                try:
-                    equiformer_checkpoint = torch.load(
-                        kwargs["pretrained_equiformer"], map_location="cpu"
-                    )
-                    new_qeuiformer_state = OrderedDict()
-                    for key in equiformer_checkpoint["state_dict"].keys():
-                        new_qeuiformer_state[
-                            key.replace("module.", "")
-                        ] = equiformer_checkpoint["state_dict"][key]
-                    self.load_state_dict(new_qeuiformer_state, strict=False)
-                    print(
-                        "Equiformer: Successfully load the pretrained model!!!"
-                    )
-                except Exception:
-                    print(
-                        "Equiformer: The pretrained model or its path has problems, please check."
-                    )
+            equiformer_checkpoint = torch.load(
+                kwargs["pretrained_equiformer"], map_location="cpu"
+            )
+            if "state_dict" in equiformer_checkpoint:
+                equiformer_checkpoint = equiformer_checkpoint["state_dict"]
+            new_equiformer_state = OrderedDict()
+            for key in equiformer_checkpoint.keys():
+                new_equiformer_state[
+                    key.replace("module.", "")
+                ] = equiformer_checkpoint[key]
+            self.load_state_dict(new_equiformer_state, strict=False)
+            print("Equiformer: Successfully load the pretrained model!!!")
 
         if kwargs.get("freeze_prev_blocks", False):
             fix_idx = kwargs.get("freeze_prev_block_until", self.num_layers)

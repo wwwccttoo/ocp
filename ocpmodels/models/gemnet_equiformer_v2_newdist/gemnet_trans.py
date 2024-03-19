@@ -383,27 +383,18 @@ class GemNetTrans(BaseModel):
         # this is different from the one used on TAAG, it is a universal scaling file loading function
 
         if kwargs.get("pretrained_gemnet", None):
-            try:
-                self.load_state_dict(
-                    torch.load(kwargs["pretrained_gemnet"]), strict=False
-                )
-                print("Gemnet: Successfully load the pretrained model!!!")
-            except Exception:
-                try:
-                    equiformer_checkpoint = torch.load(
-                        kwargs["pretrained_gemnet"], map_location="cpu"
-                    )
-                    new_qeuiformer_state = OrderedDict()
-                    for key in equiformer_checkpoint["state_dict"].keys():
-                        new_qeuiformer_state[
-                            key.replace("module.", "")
-                        ] = equiformer_checkpoint["state_dict"][key]
-                    self.load_state_dict(new_qeuiformer_state, strict=False)
-                    print("Gemnet: Successfully load the pretrained model!!!")
-                except Exception:
-                    print(
-                        "Gemnet: The pretrained model or its path has problems, please check."
-                    )
+            gemnet_checkpoint = torch.load(
+                kwargs["pretrained_gemnet"], map_location="cpu"
+            )
+            if "state_dict" in gemnet_checkpoint:
+                gemnet_checkpoint = gemnet_checkpoint["state_dict"]
+            new_gemnet_state = OrderedDict()
+            for key in gemnet_checkpoint.keys():
+                new_gemnet_state[
+                    key.replace("module.", "")
+                ] = gemnet_checkpoint[key]
+            self.load_state_dict(new_gemnet_state, strict=False)
+            print("Gemnet: Successfully load the pretrained model!!!")
         # overwrite the scale file
         load_scales_compat(self, scale_file)
 
