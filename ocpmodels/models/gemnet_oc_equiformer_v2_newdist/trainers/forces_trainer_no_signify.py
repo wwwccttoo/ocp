@@ -57,9 +57,9 @@ def add_weight_decay(model, weight_decay, skip_list=()):
 
 
 @registry.register_trainer(
-    "gemnet_equiformerv2_plasma_forces_newdist_no_signify"
+    "gemnet_OC_equiformerv2_plasma_forces_newdist_no_signify"
 )
-class GemnetEquiformerV2ForcesTrainer(ForcesTrainer):
+class GemnetOCEquiformerV2ForcesTrainer(ForcesTrainer):
     # This trainer does a few things differently from the parent forces trainer:
     # - Different way of setting up model parameters with no weight decay.
     # - Support for cosine LR scheduler.

@@ -524,6 +524,7 @@ class GemNetOC(BaseModel):
 
         if self.after_freeze_numblocks > 0:
             # we need to account for the newly added blocks
+            # we project the output to target directly
             self.after_out_mlp_E = [
                 Dense(emb_size_atom, num_targets, bias=False, activation=None)
                 for _ in range(self.after_freeze_numblocks)
