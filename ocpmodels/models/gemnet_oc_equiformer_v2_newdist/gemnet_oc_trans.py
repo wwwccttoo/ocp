@@ -385,17 +385,17 @@ class GemNetOC(BaseModel):
         else:
             emb_size_taag = emb_size_atom
 
-        self.lin_query_MHA = nn.Linear(emb_size_taag, emb_size_taag)
-        self.lin_key_MHA = nn.Linear(emb_size_taag, emb_size_taag)
-        self.lin_value_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.lin_query_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.lin_key_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.lin_value_MHA = nn.Linear(emb_size_taag, emb_size_taag)
 
-        self.softmax = nn.Softmax(dim=1)
-        self.MHA = nn.MultiheadAttention(
-            embed_dim=emb_size_taag,
-            num_heads=num_heads,
-            bias=True,
-            dropout=0.0,
-        )
+            self.softmax = nn.Softmax(dim=1)
+            self.MHA = nn.MultiheadAttention(
+                embed_dim=emb_size_taag,
+                num_heads=num_heads,
+                bias=True,
+                dropout=0.0,
+            )
 
         # for forces
         if self.attn_type == "base":
@@ -403,24 +403,24 @@ class GemNetOC(BaseModel):
         else:
             emb_size_taag = emb_size_edge
 
-        self.force_lin_query_MHA = nn.Linear(emb_size_taag, emb_size_taag)
-        self.force_lin_key_MHA = nn.Linear(emb_size_taag, emb_size_taag)
-        self.force_lin_value_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.force_lin_query_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.force_lin_key_MHA = nn.Linear(emb_size_taag, emb_size_taag)
+            self.force_lin_value_MHA = nn.Linear(emb_size_taag, emb_size_taag)
 
-        self.force_MHA = nn.MultiheadAttention(
-            embed_dim=emb_size_taag,
-            num_heads=num_heads,
-            bias=True,
-            dropout=0.0,
-        )
+            self.force_MHA = nn.MultiheadAttention(
+                embed_dim=emb_size_taag,
+                num_heads=num_heads,
+                bias=True,
+                dropout=0.0,
+            )
 
-        if self.add_positional_embedding:
-            self.MHA_positional_embedding = PositionalEncoding(
-                emb_size_atom, dropout=0.0, max_len=len(self.out_blocks)
-            )
-            self.force_MHA_positional_embedding = PositionalEncoding(
-                emb_size_edge, dropout=0.0, max_len=len(self.out_blocks)
-            )
+            if self.add_positional_embedding:
+                self.MHA_positional_embedding = PositionalEncoding(
+                    emb_size_atom, dropout=0.0, max_len=len(self.out_blocks)
+                )
+                self.force_MHA_positional_embedding = PositionalEncoding(
+                    emb_size_edge, dropout=0.0, max_len=len(self.out_blocks)
+                )
 
         if self.freeze:
             self.after_freeze_IB = torch.nn.ModuleList(
