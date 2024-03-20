@@ -537,7 +537,7 @@ class GemNetOC(BaseModel):
                     for _ in range(self.after_freeze_numblocks)
                 ]
 
-        if kwargs.get("pretrained_gemnet", None):
+        if kwargs.get("pretrained_gemnet", None) is not None:
             gemnet_checkpoint = torch.load(
                 kwargs["pretrained_gemnet"], map_location="cpu"
             )

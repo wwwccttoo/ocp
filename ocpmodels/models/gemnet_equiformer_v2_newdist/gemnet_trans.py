@@ -286,15 +286,17 @@ class GemNetTrans(BaseModel):
                     # if "MHA" not in name and "block" not in name:
                     param.requires_grad = False
 
-        if kwargs.get("gemnet_freeze_until", None):
+        if kwargs.get("gemnet_freeze_until", None) is not None:
             freeze_until = kwargs["gemnet_freeze_until"]
             for i in range(freeze_until, self.num_blocks + 1):
                 for name, param in self.out_blocks[i].named_parameters():
-                    param.requires_grad = True
+                    if "scale" not in name:
+                        param.requires_grad = True
             # the number of interaction blocks is num_blocks - 1
             for i in range(max(0, freeze_until - 1), self.num_blocks):
                 for name, param in self.int_blocks[i].named_parameters():
-                    param.requires_grad = True
+                    if "scale" not in name:
+                        param.requires_grad = True
 
         if self.attn_type == "base":
             emb_size_taag = 1
