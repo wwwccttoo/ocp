@@ -529,6 +529,7 @@ class GemNetOC(BaseModel):
                 Dense(emb_size_atom, num_targets, bias=False, activation=None)
                 for _ in range(self.after_freeze_numblocks)
             ]
+            self.after_out_mlp_E = torch.nn.Sequential(*self.after_out_mlp_E)
             if direct_forces:
                 self.after_out_mlp_F = [
                     Dense(
@@ -536,6 +537,9 @@ class GemNetOC(BaseModel):
                     )
                     for _ in range(self.after_freeze_numblocks)
                 ]
+                self.after_out_mlp_F = torch.nn.Sequential(
+                    *self.after_out_mlp_F
+                )
 
         if kwargs.get("pretrained_gemnet", None) is not None:
             gemnet_checkpoint = torch.load(
@@ -1477,8 +1481,8 @@ class GemNetOC(BaseModel):
             xs_F.append(x_F)
 
         if self.attn_type == "multi":
-            x_E_att = torch.cat(xs_E, dim=0)
-            x_F_att = torch.cat(xs_F, dim=0)
+            x_E_att = torch.cat([_.unsqueeze(0) for _ in xs_E], dim=0)
+            x_F_att = torch.cat([_.unsqueeze(0) for _ in xs_F], dim=0)
             if self.add_positional_embedding and self.attn_type != "base":
                 x_E_att = self.MHA_positional_embedding(x_E_att)
                 x_F_att = self.force_MHA_positional_embedding(x_F_att)
@@ -1493,15 +1497,15 @@ class GemNetOC(BaseModel):
             k = self.lin_key_MHA(x_E_att)
             v = self.lin_value_MHA(x_E_att)
 
-            E_t, w = self.MHA(q, k, v)
-            E_t = torch.sum(E_t, dim=0)
+            x_E, w = self.MHA(q, k, v)
+            x_E = torch.sum(x_E, dim=0)
 
             q = self.force_lin_query_MHA(x_F_att)
             k = self.force_lin_key_MHA(x_F_att)
             v = self.force_lin_value_MHA(x_F_att)
 
-            F_st, w = self.force_MHA(q, k, v)
-            F_st = torch.sum(F_st, dim=0)
+            x_F, w = self.force_MHA(q, k, v)
+            x_F = torch.sum(x_F, dim=0)
 
         with torch.cuda.amp.autocast(False):
             E_t = self.out_energy(x_E.float())
