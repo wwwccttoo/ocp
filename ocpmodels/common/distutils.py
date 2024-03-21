@@ -8,17 +8,12 @@ LICENSE file in the root directory of this source tree.
 import logging
 import os
 import subprocess
-from datetime import timedelta
 from typing import List
 
 import torch
 import torch.distributed as dist
-from packaging import version
 
 from ocpmodels.common.typing import none_throws
-
-installed_version = version.parse(torch.__version__.split("+")[0])
-target_version = version.parse("1.13.1")
 
 
 def os_environ_get_or_throw(x: str) -> str:
@@ -102,36 +97,9 @@ def setup(config) -> None:
             init_method="env://",
         )
     else:
-        if installed_version <= target_version:
-            dist.init_process_group(
-                backend=config["distributed_backend"],
-                init_method="env://",
-                timeout=timedelta(seconds=7200000),
-            )
-        else:
-            dist.init_process_group(
-                backend=config["distributed_backend"],
-                init_method="env://",
-                timeout=timedelta(seconds=7200000),
-            )
-            rank = dist.get_rank()
-            world_size = dist.get_world_size()
-
-            # Ensure a unique GPU is assigned to each process
-            device_id = rank % torch.cuda.device_count()
-            device = torch.device(f"cuda:{device_id}")
-            torch.cuda.set_device(device)
-
-            config["rank"] = rank
-            config["world_size"] = world_size
-            config["device_id"] = device_id
-            config["device"] = device
-            config["local_rank"] = device_id
-
-            logging.info(
-                f"Process {rank}/{world_size} initializing, assigned to {device}."
-            )
-
+        dist.init_process_group(
+            backend=config["distributed_backend"], init_method="env://"
+        )
     # TODO: SLURM
 
 
