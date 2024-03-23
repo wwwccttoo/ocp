@@ -379,9 +379,9 @@ class GemNetTrans(BaseModel):
                     for i in range(self.after_freeze_numblocks)
                 ]
             )
-
-            self.out_energy = Dense(emb_size_atom, num_targets)
-            self.out_forces = Dense(emb_size_edge, num_targets)
+            if self.attn_type != "base":
+                self.out_energy = Dense(emb_size_atom, num_targets)
+                self.out_forces = Dense(emb_size_edge, num_targets)
         # this is different from the one used on TAAG, it is a universal scaling file loading function
 
         if kwargs.get("pretrained_gemnet", None):
