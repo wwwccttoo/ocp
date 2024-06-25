@@ -1,6 +1,6 @@
 # Transfer Learning in Plasma Catalysis
 
-This is the codebase developed from the Open Catalysis Project (OCP), for transfer learning from thermal catalysis to plasma catalysis. The installation, usage, etc of the code remain the same as in the [`OCP`](https://github.com/wwwccttoo/ocp/README_OCP.md)
+This is the codebase developed from the Open Catalysis Project (OCP), for transfer learning from thermal catalysis to plasma catalysis. The installation, usage, etc of the code remain the same as in the [`OCP`](https://github.com/wwwccttoo/ocp/blob/main/README_OCP.md)
 
 ## Features
 
