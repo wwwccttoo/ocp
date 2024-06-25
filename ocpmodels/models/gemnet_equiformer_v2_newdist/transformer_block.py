@@ -379,7 +379,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
 
         try:
             with open(
-                "/Volumes/Extreme SSD/ocp_transfer/attention_sroce.pkl", "rb"
+                "/Volumes/Extreme SSD/ocp_transfer/attention_score.pkl", "rb"
             ) as fp:
                 tmp_res = pickle.load(fp)
         except Exception:
@@ -392,7 +392,7 @@ class SO2EquivariantGraphAttention(torch.nn.Module):
             }
             tmp_res.append(tmp_dic)
             with open(
-                "/Volumes/Extreme SSD/ocp_transfer/attention_sroce.pkl", "wb"
+                "/Volumes/Extreme SSD/ocp_transfer/attention_score.pkl", "wb"
             ) as fp:
                 pickle.dump(tmp_res, fp)
         except Exception:
