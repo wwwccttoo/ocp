@@ -10,7 +10,7 @@ repos:
     - id: flake8
     - id: trailing-whitespace
     - id: check-added-large-files
-      args: ["--maxkb=2000"]
+      args: ["--maxkb=30000"]
     - id: end-of-file-fixer
 - repo: https://github.com/pre-commit/mirrors-isort
   rev: v5.9.1
